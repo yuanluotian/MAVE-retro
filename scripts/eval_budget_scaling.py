@@ -12,7 +12,7 @@ from evaluate import (
     save_report,
 )
 
-from mave_repro.core.utils import (
+from mave.core.utils import (
     set_seed,
 )
 

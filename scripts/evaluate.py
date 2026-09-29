@@ -9,11 +9,11 @@ from typing import Any, Callable
 
 from omegaconf import OmegaConf
 
-from mave_repro.core.utils import (
+from mave.core.utils import (
     set_seed,
 )
 
-from mave_repro.evaluation.evaluator import (
+from mave.evaluation.evaluator import (
     Evaluator,
     report_to_dict,
 )

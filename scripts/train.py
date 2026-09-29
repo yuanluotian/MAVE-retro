@@ -8,32 +8,32 @@ from typing import Any, Callable
 
 from omegaconf import OmegaConf
 
-from mave_repro.core.utils import (
+from mave.core.utils import (
     ensure_dir,
     set_seed,
 )
 
-from mave_repro.mave.curve_fit import (
+from mave.mave.curve_fit import (
     CurveFitConfig,
 )
 
-from mave_repro.mave.rollout_group import (
+from mave.mave.rollout_group import (
     MAVEGroupConfig,
     MAVEGroupProcessor,
 )
 
-from mave_repro.training.alternating import (
+from mave.training.alternating import (
     AlternatingTrainConfig,
     AlternatingTrainer,
     TrainingPhase,
 )
 
-from mave_repro.training.train_escalation import (
+from mave.training.train_escalation import (
     EscalationTrainConfig,
     EscalationTrainer,
 )
 
-from mave_repro.training.train_reaction import (
+from mave.training.train_reaction import (
     ReactionTrainConfig,
     ReactionTrainer,
 )

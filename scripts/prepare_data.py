@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from mave_repro.chemistry.canonicalize import (
+from mave.chemistry.canonicalize import (
     canonicalize_smiles,
 )
 

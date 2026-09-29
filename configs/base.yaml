@@ -3,7 +3,7 @@
 # ============================================================
 
 project:
-  name: mave_repro
+  name: mave
   experiment_name: null
   output_dir: outputs
   log_dir: logs
