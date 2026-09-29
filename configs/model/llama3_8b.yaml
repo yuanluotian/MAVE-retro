@@ -1,0 +1,85 @@
+# ============================================================
+# Shared LLM backbone
+# ============================================================
+
+model:
+  name: llama3_8b_instruct
+  pretrained_name: meta-llama/Meta-Llama-3-8B-Instruct
+
+  architecture: causal_lm
+
+  # Paper-specified backbone.
+  parameter_size: 8B
+
+  dtype: bfloat16
+
+  tokenizer:
+    padding_side: left
+    truncation_side: left
+
+  # Not specified by the paper.
+  max_context_length: null
+
+# ------------------------------------------------------------
+# Policy organization
+# ------------------------------------------------------------
+
+policies:
+  shared_backbone: true
+
+  escalation:
+    name: mu
+    task: escalation
+
+    # Policy chooses:
+    #   STOP
+    # or
+    #   ESCALATE(query at next feedback level)
+    output_type: categorical_action
+
+    prompt_template: null
+
+  reaction:
+    name: pi
+    task: reaction_selection
+
+    # Scores reactions proposed by the single-step model.
+    output_type: candidate_distribution
+
+    prompt_template: null
+
+# ------------------------------------------------------------
+# Parameter-efficient training
+# ------------------------------------------------------------
+
+# The paper does not specify whether training uses
+# full fine-tuning, LoRA, adapters, etc.
+finetuning:
+  method: null
+
+  lora:
+    enabled: false
+    rank: null
+    alpha: null
+    dropout: null
+    target_modules: null
+
+# ------------------------------------------------------------
+# Generation / sampling
+# ------------------------------------------------------------
+
+generation:
+  # Not uniquely specified in the paper.
+  temperature: null
+  top_p: null
+  top_k: null
+
+# ------------------------------------------------------------
+# Output constraints
+# ------------------------------------------------------------
+
+reaction_policy:
+  # Recommended reproduction design:
+  # select among single-step model candidates rather than
+  # generating arbitrary reaction SMILES.
+  candidate_selection_only: true

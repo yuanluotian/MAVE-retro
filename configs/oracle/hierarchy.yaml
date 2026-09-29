@@ -1,0 +1,220 @@
+# ============================================================
+# Multi-fidelity feedback hierarchy
+# ============================================================
+
+oracle:
+  setting: hierarchy
+
+  max_level: 4
+
+  cost_unit: relative_dimensionless
+  cost_reference: reaction_yield
+
+  # ==========================================================
+  # L0 — No feedback
+  # ==========================================================
+
+  hierarchy:
+
+    L0:
+      level: 0
+      name: none
+      category: none
+
+      queries:
+        none:
+          base_cost: 0.0
+          cost_range:
+            min: 0.0
+            max: 0.0
+
+    # ========================================================
+    # L1 — Structural feedback
+    # ========================================================
+
+    L1:
+      level: 1
+      name: structural
+
+      backend:
+        type: round_trip_template_model
+        checkpoint: null
+
+      queries:
+
+        activity_assessment:
+          base_cost: 0.10
+          cost_range:
+            min: 0.08
+            max: 0.12
+
+        reaction_class:
+          base_cost: 0.25
+          cost_range:
+            min: 0.20
+            max: 0.30
+
+        reaction_center:
+          base_cost: 0.30
+          cost_range:
+            min: 0.24
+            max: 0.36
+
+        bond_disconnection:
+          base_cost: 0.35
+          cost_range:
+            min: 0.28
+            max: 0.42
+
+      complexity_adjustment:
+        type: deterministic
+        factors:
+          - num_competing_reactive_centers
+          - num_plausible_disconnections
+
+    # ========================================================
+    # L2 — Evaluative feedback
+    # ========================================================
+
+    L2:
+      level: 2
+      name: evaluative
+
+      queries:
+
+        reaction_feasibility:
+          backend: round_trip
+          output_type: binary
+
+          base_cost: 0.80
+          cost_range:
+            min: 0.64
+            max: 0.96
+
+        reaction_yield:
+          backend: yield_predictor
+          output_type: scalar
+          output_range:
+            min: 0.0
+            max: 1.0
+
+          base_cost: 1.00
+          cost_range:
+            min: 0.80
+            max: 1.20
+
+        selectivity_assessment:
+          backend: round_trip
+          output_type: assessment
+
+          base_cost: 1.20
+          cost_range:
+            min: 0.96
+            max: 1.44
+
+      complexity_adjustment:
+        type: deterministic
+        factors:
+          - num_atoms
+          - num_reactants
+          - num_reagents
+
+    # ========================================================
+    # L3 — Comparative feedback
+    # ========================================================
+
+    L3:
+      level: 3
+      name: comparative
+
+      queries:
+
+        reaction_comparison:
+          backend: yield_predictor
+          output_type: preference
+
+          base_cost: 2.00
+          cost_range:
+            min: 1.60
+            max: 2.40
+
+        route_comparison:
+          backend: round_trip
+          output_type: preference
+
+          base_cost: 3.50
+          cost_range:
+            min: 2.80
+            max: 4.20
+
+      complexity_adjustment:
+        type: deterministic
+        factors:
+          - alternative_similarity
+          - molecular_complexity
+          - reagent_complexity
+
+    # ========================================================
+    # L4 — Strategic feedback
+    # ========================================================
+
+    L4:
+      level: 4
+      name: strategic
+
+      backend:
+        type: depth_limited_and_or_traversal
+
+      queries:
+
+        goal_suggestion:
+          output_type: subgoal_candidates
+
+          base_cost: 5.00
+          cost_range:
+            min: 4.00
+            max: 6.00
+
+        multi_step_strategy:
+          output_type: textual_guidance
+
+          base_cost: 10.00
+          cost_range:
+            min: 8.00
+            max: 12.00
+
+      complexity_adjustment:
+        type: deterministic
+        factors:
+          - wall_clock_search_time
+          - traversal_search_space_size
+
+      information_boundary:
+        expose_internal_tree: false
+        use_ground_truth_route: false
+        use_terminal_reachability_labels: false
+
+# ------------------------------------------------------------
+# Query cost
+# ------------------------------------------------------------
+
+cost:
+  # Query-specific variation stays within ±20% around
+  # its base value.
+  adjustment_range: 0.20
+
+  # Not random sampling.
+  random_sampling: false
+
+  independent_of_downstream_reward: true
+
+# ------------------------------------------------------------
+# Feedback accumulation
+# ------------------------------------------------------------
+
+feedback:
+  accumulate_across_levels: true
+
+  cache:
+    enabled: true
+    reuse_without_cost: true

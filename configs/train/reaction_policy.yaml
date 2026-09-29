@@ -1,0 +1,115 @@
+# ============================================================
+# Reaction-policy training
+# ============================================================
+
+train:
+  task: reaction_policy
+  policy: pi
+
+  algorithm: grpo
+
+# ------------------------------------------------------------
+# Alternating optimization
+# ------------------------------------------------------------
+
+alternating:
+  enabled: true
+
+  # Optimize pi while mu is frozen.
+  optimize: pi
+  freeze: mu
+
+  interval: 1
+
+# ------------------------------------------------------------
+# Input
+# ------------------------------------------------------------
+
+input:
+  use_planning_state: true
+  use_candidate_reactions: true
+  use_accumulated_feedback: true
+
+# ------------------------------------------------------------
+# Reaction candidates
+# ------------------------------------------------------------
+
+candidates:
+  source: single_step_model
+
+  # Paper-specified.
+  top_k: 50
+
+  candidate_selection_only: true
+
+# ------------------------------------------------------------
+# Policy
+# ------------------------------------------------------------
+
+policy:
+  output: categorical_distribution
+
+  # pi(a | s, f)
+  condition_on:
+    - planning_state
+    - accumulated_feedback
+    - candidate_reactions
+
+# ------------------------------------------------------------
+# Return
+# ------------------------------------------------------------
+
+return:
+  type: discounted_downstream_return
+
+  gamma: 0.95
+
+  # Paper does not completely specify numerical R(s,a).
+  reward_definition: null
+
+# ------------------------------------------------------------
+# GRPO
+# ------------------------------------------------------------
+
+grpo:
+  learning_rate: 3.0e-5
+
+  clipping_range: 0.2
+
+  kl:
+    enabled: true
+    coefficient: 0.001
+
+# ------------------------------------------------------------
+# Optimization
+# ------------------------------------------------------------
+
+optimization:
+  epochs: 10000
+  batch_size: 6
+
+  gradient_accumulation_steps: null
+  max_grad_norm: null
+  warmup_steps: null
+  weight_decay: null
+
+# ------------------------------------------------------------
+# Planner interface
+# ------------------------------------------------------------
+
+planner_interface:
+  # At inference:
+  # P(s,a) = pi(a | s,f)
+  use_policy_probability_as_prior: true
+
+  # Q_0(s,a) = P(s,a)
+  initialize_q_from_prior: true
+
+# ------------------------------------------------------------
+# Diagnostics
+# ------------------------------------------------------------
+
+diagnostics:
+  log_policy_entropy: true
+  log_selected_reaction_rank: true
+  log_downstream_return: true

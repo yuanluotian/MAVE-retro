@@ -1,0 +1,120 @@
+# ============================================================
+# AND-OR MCTS planner
+# ============================================================
+
+planner:
+  name: mcts
+  tree_type: and_or
+
+# ------------------------------------------------------------
+# Search
+# ------------------------------------------------------------
+
+search:
+  max_single_step_calls: 100
+
+  # Candidate reactions generated at expansion.
+  num_reaction_candidates: 50
+
+  stop_on_first_complete_route: true
+
+# ------------------------------------------------------------
+# Selection
+# ------------------------------------------------------------
+
+selection:
+  type: puct
+
+  # Paper:
+  #
+  # Q(s,a) +
+  # c_puct * P(s,a) * sqrt(N(s)) / (1 + N(s,a))
+  #
+  # Exact c_puct is not specified.
+  cpuct: null
+
+# ------------------------------------------------------------
+# Expansion
+# ------------------------------------------------------------
+
+expansion:
+  use_single_step_model: true
+
+  # Reaction-policy probability:
+  #
+  # P(s,a) = pi(a | s,f)
+  prior_source: reaction_policy
+
+  # Paper initializes:
+  #
+  # Q_0(s,a) = P(s,a)
+  initial_q: policy_prior
+
+# ------------------------------------------------------------
+# Leaf evaluation
+# ------------------------------------------------------------
+
+leaf_value:
+  solved: 1.0
+  dead: 0.0
+
+  # Non-terminal:
+  # v(s) = max_a P(s,a)
+  nonterminal: max_policy_probability
+
+# ------------------------------------------------------------
+# Backup
+# ------------------------------------------------------------
+
+backup:
+  discount_factor: 0.95
+
+  update_rule: incremental_mean
+
+# ------------------------------------------------------------
+# Escalation during expansion
+# ------------------------------------------------------------
+
+escalation:
+  enabled: true
+  max_level: 4
+
+  policy: mu
+
+  # Start from L0 and progressively acquire feedback.
+  initial_level: 0
+
+  stop_action: STOP
+  escalation_action: ESCALATE
+
+# ------------------------------------------------------------
+# Feedback budget
+# ------------------------------------------------------------
+
+feedback_budget:
+  # Algorithm 2 contains B_f, but the numerical value is
+  # not specified in the paper.
+  max_cost: null
+
+  enforce_budget: true
+
+# ------------------------------------------------------------
+# Feedback cache
+# ------------------------------------------------------------
+
+feedback_cache:
+  enabled: true
+
+  # Previously acquired feedback is reused at no additional cost.
+  charge_cached_query: false
+
+# ------------------------------------------------------------
+# Training-only components
+# ------------------------------------------------------------
+
+# IMPORTANT:
+# Reward-cost fitting and MAVE derivative computation are NOT
+# performed during inference.
+training_only:
+  reward_cost_fit: false
+  compute_marginal_value: false

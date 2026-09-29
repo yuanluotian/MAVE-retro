@@ -1,0 +1,143 @@
+# ============================================================
+# Global configuration
+# ============================================================
+
+project:
+  name: mave_repro
+  experiment_name: null
+  output_dir: outputs
+  log_dir: logs
+  checkpoint_dir: checkpoints
+
+# ------------------------------------------------------------
+# Reproducibility
+# ------------------------------------------------------------
+
+seed: 42
+
+deterministic:
+  enabled: true
+  cudnn_benchmark: false
+
+# ------------------------------------------------------------
+# Runtime
+# ------------------------------------------------------------
+
+runtime:
+  device: cuda
+  dtype: bfloat16
+  num_workers: 4
+
+  # Reproduction choice, not specified in the paper.
+  mixed_precision: true
+
+# ------------------------------------------------------------
+# Paths
+# ------------------------------------------------------------
+
+paths:
+  data_root: data
+  target_root: data/targets
+  processed_root: data/processed
+  purchasable_db: data/purchasable/emolecules
+  reaction_data: data/reactions
+
+# ------------------------------------------------------------
+# Retrosynthesis environment
+# ------------------------------------------------------------
+
+environment:
+  name: retrosynthesis
+
+  # A state consists of the currently unsolved molecules.
+  state_type: unsolved_molecules
+
+  # A trajectory succeeds when all remaining molecules are
+  # purchasable building blocks.
+  terminal_condition: all_purchasable
+
+  purchasable_database:
+    name: emolecules
+    path: ${paths.purchasable_db}
+
+  transition:
+    deterministic: true
+
+  # IMPORTANT:
+  # The paper formulates R(s, a), but does not fully specify
+  # its exact numerical implementation.
+  reward:
+    type: null
+    terminal_success_reward: null
+    terminal_failure_reward: null
+    intermediate_reward: null
+
+# ------------------------------------------------------------
+# Single-step retrosynthesis model
+# ------------------------------------------------------------
+
+single_step:
+  # Paper: template-based predictor from Chen et al. (2020).
+  type: template_based
+
+  checkpoint: null
+
+  # Paper-specified.
+  top_k: 50
+
+  canonicalize_smiles: true
+  remove_duplicates: true
+
+# ------------------------------------------------------------
+# Main search budget
+# ------------------------------------------------------------
+
+budget:
+  # Main-text setting.
+  max_single_step_calls: 100
+
+  # Larger budgets evaluated in appendix.
+  scaling_budgets:
+    - 100
+    - 200
+    - 500
+    - 1000
+
+# ------------------------------------------------------------
+# Feedback
+# ------------------------------------------------------------
+
+feedback:
+  max_level: 4
+
+  # Feedback is accumulated during escalation.
+  accumulate: true
+
+  # Previously acquired feedback is reused without additional cost.
+  cache_enabled: true
+
+# ------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------
+
+logging:
+  level: INFO
+  log_every: 10
+
+  save_rollouts: true
+  save_routes: true
+  save_feedback_traces: true
+  save_reward_cost_pairs: true
+  save_curve_fit_statistics: true
+
+# ------------------------------------------------------------
+# Reproduction metadata
+# ------------------------------------------------------------
+
+reproduction:
+  source: paper_only
+  use_original_repository: false
+
+  # Anything not explicitly specified by the paper should be
+  # recorded here rather than silently assumed.
+  track_unspecified_choices: true

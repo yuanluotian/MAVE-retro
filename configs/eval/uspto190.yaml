@@ -1,0 +1,108 @@
+# ============================================================
+# USPTO-190 evaluation
+# ============================================================
+
+benchmark:
+  name: USPTO-190
+
+  num_targets: 190
+
+  target_file: data/targets/uspto190.csv
+
+# ------------------------------------------------------------
+# Search
+# ------------------------------------------------------------
+
+search:
+  planner: mcts
+
+  max_single_step_calls: 100
+
+  single_step:
+    top_k: 50
+
+# ------------------------------------------------------------
+# Feedback setting
+# ------------------------------------------------------------
+
+feedback:
+  setting: hierarchy
+
+# ------------------------------------------------------------
+# Metrics
+# ------------------------------------------------------------
+
+metrics:
+
+  success_rate:
+    enabled: true
+
+  route_quality:
+    enabled: true
+
+    reaction_score:
+      source: yield_predictor
+      range:
+        min: 0.0
+        max: 1.0
+
+    aggregation:
+      # Q(m) = q(r) * min_child Q(child)
+      tree_rule: product_with_min_branch
+
+    normalization:
+      enabled: true
+
+      # Q_route = S(returned route) / S(optimal route)
+      reference: target_specific_optimal_route
+
+      # Paper uses exhaustive traversal within the defined
+      # reaction search space.
+      optimal_route_method: exhaustive_traversal
+
+  query_rate:
+    enabled: true
+
+    definition: fraction_of_planning_iterations_using_feedback
+
+  query_cost:
+    enabled: true
+
+    aggregation: cumulative_per_episode
+    report: mean_over_targets
+
+# ------------------------------------------------------------
+# Difficulty analysis
+# ------------------------------------------------------------
+
+difficulty:
+  enabled: true
+
+  reference_planner: retro_star_plus
+
+  measure: single_step_model_calls_to_first_solution
+
+  groups:
+    easy:
+      max_exclusive: 100
+
+    medium:
+      min_inclusive: 100
+      max_exclusive: 500
+
+    hard:
+      min_inclusive: 500
+
+  unsolved_after_threshold: hard
+
+# ------------------------------------------------------------
+# Outputs
+# ------------------------------------------------------------
+
+output:
+  save_routes: true
+  save_per_target_metrics: true
+  save_query_trace: true
+  save_stopping_depth: true
+
+  result_file: outputs/eval/uspto190_results.json
