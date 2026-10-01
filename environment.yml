@@ -1,0 +1,26 @@
+name: mave
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip>=24.0
+  - setuptools>=68
+  - wheel>=0.43
+  - git
+  - git-lfs
+  - cmake>=3.26
+  - ninja
+  - make
+  - gcc_linux-64
+  - gxx_linux-64
+  - numpy<2.0
+  - scipy>=1.11
+  - pandas>=2.1
+  - scikit-learn>=1.4
+  - networkx>=3.2
+  - rdkit>=2023.09
+  - pyyaml>=6.0
+  - tqdm>=4.66
+  - pip:
+      - -r requirements.txt

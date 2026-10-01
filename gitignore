@@ -1,0 +1,105 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
+
+# Packaging
+pip-wheel-metadata/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Linters / type checkers
+.ruff_cache/
+.mypy_cache/
+.pyright/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Experiment outputs
+outputs/
+results/
+runs/
+experiments/
+wandb/
+mlruns/
+
+# Checkpoints / model artifacts
+checkpoints/
+rlhf-ckpts/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+
+# Hugging Face / model caches
+.huggingface/
+hf_cache/
+transformers_cache/
+
+# Ray / distributed runtime
+ray_results/
+ray_temp/
+.ray/
+
+# Temporary files
+tmp/
+temp/
+cache/
+*.tmp
+
+# Data caches / generated data
+data/cache/
+data/processed/
+data/tmp/
+
+# Local configs
+*.local.yaml
+*.local.yml
+*.local.json
+
+# Secrets
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# Anonymous-review safety
+AUTHORS
+AUTHORS.md
+CITATION.cff
+CODEOWNERS
