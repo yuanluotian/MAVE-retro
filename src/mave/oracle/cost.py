@@ -1,178 +1,213 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Callable
+
+from mave.oracle.base import (
+    FeedbackType,
+)
 
 
-@dataclass(frozen=True, slots=True)
+# ============================================================
+# Cost specification
+# ============================================================
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
 class CostSpec:
-    """
-    Relative acquisition-cost specification.
-    """
 
     base: float
+
     minimum: float
+
     maximum: float
 
-    def __post_init__(self) -> None:
-        if self.base < 0:
-            raise ValueError(
-                "base cost must be non-negative."
-            )
-
-        if not (
-            0 <= self.minimum
-            <= self.base
-            <= self.maximum
-        ):
-            raise ValueError(
-                "Expected minimum <= base <= maximum."
-            )
-
 
 # ============================================================
-# Paper-specified Table 6
+# Paper cost schedule
 # ============================================================
 
 
-DEFAULT_COST_SPECS: dict[
-    str,
+COST_SPECS: dict[
+    FeedbackType,
     CostSpec,
 ] = {
 
+    # --------------------------------------------------------
     # L0
-    "none": CostSpec(
-        base=0.00,
-        minimum=0.00,
-        maximum=0.00,
-    ),
+    # --------------------------------------------------------
 
-    # L1
-    "activity_assessment": CostSpec(
-        base=0.10,
-        minimum=0.08,
-        maximum=0.12,
-    ),
+    FeedbackType.NONE:
+        CostSpec(
+            base=0.00,
+            minimum=0.00,
+            maximum=0.00,
+        ),
 
-    "reaction_class": CostSpec(
-        base=0.25,
-        minimum=0.20,
-        maximum=0.30,
-    ),
+    # --------------------------------------------------------
+    # L1 Structural
+    # --------------------------------------------------------
 
-    "reaction_center": CostSpec(
-        base=0.30,
-        minimum=0.24,
-        maximum=0.36,
-    ),
+    FeedbackType.ACTIVITY_ASSESSMENT:
+        CostSpec(
+            base=0.10,
+            minimum=0.08,
+            maximum=0.12,
+        ),
 
-    "bond_disconnection": CostSpec(
-        base=0.35,
-        minimum=0.28,
-        maximum=0.42,
-    ),
+    FeedbackType.REACTION_CLASS:
+        CostSpec(
+            base=0.25,
+            minimum=0.20,
+            maximum=0.30,
+        ),
 
-    # L2
-    "reaction_feasibility": CostSpec(
-        base=0.80,
-        minimum=0.64,
-        maximum=0.96,
-    ),
+    FeedbackType.REACTION_CENTER:
+        CostSpec(
+            base=0.30,
+            minimum=0.24,
+            maximum=0.36,
+        ),
 
-    "reaction_yield": CostSpec(
-        base=1.00,
-        minimum=0.80,
-        maximum=1.20,
-    ),
+    FeedbackType.BOND_DISCONNECTION:
+        CostSpec(
+            base=0.35,
+            minimum=0.28,
+            maximum=0.42,
+        ),
 
-    "selectivity_assessment": CostSpec(
-        base=1.20,
-        minimum=0.96,
-        maximum=1.44,
-    ),
+    # --------------------------------------------------------
+    # L2 Evaluative
+    # --------------------------------------------------------
 
-    # L3
-    "reaction_comparison": CostSpec(
-        base=2.00,
-        minimum=1.60,
-        maximum=2.40,
-    ),
+    FeedbackType.REACTION_FEASIBILITY:
+        CostSpec(
+            base=0.80,
+            minimum=0.64,
+            maximum=0.96,
+        ),
 
-    "route_comparison": CostSpec(
-        base=3.50,
-        minimum=2.80,
-        maximum=4.20,
-    ),
+    FeedbackType.REACTION_YIELD:
+        CostSpec(
+            base=1.00,
+            minimum=0.80,
+            maximum=1.20,
+        ),
 
-    # L4
-    "goal_suggestion": CostSpec(
-        base=5.00,
-        minimum=4.00,
-        maximum=6.00,
-    ),
+    FeedbackType.SELECTIVITY_ASSESSMENT:
+        CostSpec(
+            base=1.20,
+            minimum=0.96,
+            maximum=1.44,
+        ),
 
-    "multi_step_strategy": CostSpec(
-        base=10.00,
-        minimum=8.00,
-        maximum=12.00,
-    ),
+    # --------------------------------------------------------
+    # L3 Comparative
+    # --------------------------------------------------------
+
+    FeedbackType.REACTION_COMPARISON:
+        CostSpec(
+            base=2.00,
+            minimum=1.60,
+            maximum=2.40,
+        ),
+
+    FeedbackType.ROUTE_COMPARISON:
+        CostSpec(
+            base=3.50,
+            minimum=2.80,
+            maximum=4.20,
+        ),
+
+    # --------------------------------------------------------
+    # L4 Strategic
+    # --------------------------------------------------------
+
+    FeedbackType.GOAL_SUGGESTION:
+        CostSpec(
+            base=5.00,
+            minimum=4.00,
+            maximum=6.00,
+        ),
+
+    FeedbackType.MULTI_STEP_STRATEGY:
+        CostSpec(
+            base=10.00,
+            minimum=8.00,
+            maximum=12.00,
+        ),
 }
 
 
-class RelativeCostModel:
+# ============================================================
+# Cost model
+# ============================================================
+
+
+class AcquisitionCostModel:
     """
-    Controlled relative-cost model.
+    Compute query-specific acquisition cost.
 
-    Paper-specified:
-        query cost varies within ±20% of the base cost according
-        to query-specific acquisition complexity.
+    The paper specifies:
+        - base cost
+        - ±20% range
+        - adjustment according to query complexity
 
-    Paper-unspecified:
-        the exact mathematical mapping from complexity to cost.
+    It does not specify the exact mathematical mapping from
+    complexity to cost.
 
-    Reproduction choice:
-        complexity_score in [0, 1] is linearly mapped from the
-        minimum to maximum cost. Therefore complexity=0.5
-        reproduces the base cost.
+    Default reproduction choice:
 
-        If no complexity score is available, use the base cost.
+        complexity = 0.0 -> minimum
+        complexity = 0.5 -> base
+        complexity = 1.0 -> maximum
+
+    No random sampling is used.
     """
 
     def __init__(
         self,
-        specs: Mapping[
-            str,
-            CostSpec,
-        ] | None = None,
+        *,
+        complexity_to_cost: (
+            Callable[
+                [
+                    CostSpec,
+                    float,
+                ],
+                float,
+            ]
+            | None
+        ) = None,
     ) -> None:
 
-        self.specs = dict(
-            specs
-            or DEFAULT_COST_SPECS
+        self.complexity_to_cost = (
+            complexity_to_cost
         )
 
     def spec(
         self,
-        feedback_type: str,
+        feedback_type: FeedbackType,
     ) -> CostSpec:
 
-        try:
-            return self.specs[
-                feedback_type
-            ]
-
-        except KeyError as exc:
+        if feedback_type not in COST_SPECS:
             raise KeyError(
-                f"No cost specification for "
-                f"{feedback_type!r}."
-            ) from exc
+                "No acquisition-cost specification for "
+                f"{feedback_type.value!r}."
+            )
+
+        return COST_SPECS[
+            feedback_type
+        ]
 
     def compute(
         self,
-        feedback_type: str,
-        *,
+        feedback_type: FeedbackType,
         complexity_score: (
-            float | None
+            float
+            | None
         ) = None,
     ) -> float:
 
@@ -180,27 +215,76 @@ class RelativeCostModel:
             feedback_type
         )
 
+        if (
+            feedback_type
+            == FeedbackType.NONE
+        ):
+            return 0.0
+
+        # ----------------------------------------------------
+        # No complexity estimate:
+        # use the paper's base cost.
+        # ----------------------------------------------------
+
         if complexity_score is None:
             return float(
                 spec.base
             )
 
-        score = float(
+        complexity = float(
             complexity_score
         )
 
-        if not 0.0 <= score <= 1.0:
+        if not 0.0 <= complexity <= 1.0:
             raise ValueError(
                 "complexity_score must lie in [0, 1]."
             )
 
-        value = (
-            spec.minimum
-            + score
-            * (
-                spec.maximum
-                - spec.minimum
+        # ----------------------------------------------------
+        # Optional custom mapping
+        # ----------------------------------------------------
+
+        if (
+            self.complexity_to_cost
+            is not None
+        ):
+
+            value = float(
+                self.complexity_to_cost(
+                    spec,
+                    complexity,
+                )
             )
+
+        # ----------------------------------------------------
+        # Default reproduction mapping
+        #
+        # [0, 1] -> [minimum, maximum]
+        #
+        # Because the paper's ranges are symmetric around the
+        # base cost, complexity=0.5 gives exactly the base cost.
+        # ----------------------------------------------------
+
+        else:
+
+            value = (
+                spec.minimum
+                + complexity
+                * (
+                    spec.maximum
+                    - spec.minimum
+                )
+            )
+
+        # Numerical safety.
+        value = max(
+            spec.minimum,
+            min(
+                spec.maximum,
+                value,
+            ),
         )
 
-        return float(value)
+        return float(
+            value
+        )

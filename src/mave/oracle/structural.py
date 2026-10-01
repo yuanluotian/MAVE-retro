@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from mave.core.types import (
-    FeedbackLevel,
-    FeedbackQuery,
-)
+from typing import Any, Mapping
+
 from mave.oracle.base import (
     BackendResult,
     FeedbackOracle,
+    FeedbackQuery,
+    FeedbackType,
     OracleContext,
+    OracleResult,
 )
 from mave.oracle.backends.round_trip import (
     RoundTripBackend,
@@ -17,113 +18,288 @@ from mave.oracle.registry import (
 )
 
 
-@register_oracle(
-    "structural"
-)
-class StructuralOracle(
-    FeedbackOracle
-):
+@register_oracle("structural")
+class StructuralOracle(FeedbackOracle):
     """
     L1 structural feedback.
 
-    Paper-defined feedback types:
-      - activity assessment
-      - reaction class
-      - reaction center
-      - bond disconnection
+    The round-trip backend returns structured evidence.
+    This oracle converts that evidence into natural language.
     """
 
-    level = FeedbackLevel.L1
+    supported_types = frozenset({
+        FeedbackType.ACTIVITY_ASSESSMENT,
+        FeedbackType.REACTION_CLASS,
+        FeedbackType.REACTION_CENTER,
+        FeedbackType.BOND_DISCONNECTION,
+    })
 
     def __init__(
         self,
+        *,
         backend: RoundTripBackend,
     ) -> None:
         self.backend = backend
 
-    @property
-    def feedback_types(
+    def query(
         self,
-    ) -> tuple[str, ...]:
-        return (
-            "activity_assessment",
-            "reaction_class",
-            "reaction_center",
-            "bond_disconnection",
-        )
-
-    def available_queries(
-        self,
-        context: OracleContext,
-    ) -> tuple[
-        FeedbackQuery,
-        ...
-    ]:
-
-        common_payload = {
-            "selected_index": (
-                context.selected_index
-            ),
-            "product_smiles": (
-                context
-                .selected_molecule
-                .canonical_smiles
-            ),
-        }
-
-        return tuple(
-            FeedbackQuery(
-                level=self.level,
-                feedback_type=(
-                    feedback_type
-                ),
-                payload=(
-                    common_payload
-                ),
-            )
-            for feedback_type
-            in self.feedback_types
-        )
-
-    def evaluate(
-        self,
-        context: OracleContext,
         query: FeedbackQuery,
-    ) -> BackendResult:
+        context: OracleContext,
+    ) -> OracleResult:
 
-        self.validate_query(
-            query
+        if not self.supports(query.feedback_type):
+            raise ValueError(
+                f"Unsupported structural feedback type: "
+                f"{query.feedback_type.value}"
+            )
+
+        product = context.selected_molecule
+        candidates = context.candidates
+
+        if query.feedback_type == FeedbackType.ACTIVITY_ASSESSMENT:
+            result = self.backend.activity_assessment(
+                product,
+                candidates,
+            )
+            text = self._format_activity(
+                result.content
+            )
+
+        elif query.feedback_type == FeedbackType.REACTION_CLASS:
+            result = self.backend.reaction_class(
+                product,
+                candidates,
+            )
+            text = self._format_reaction_class(
+                result.content
+            )
+
+        elif query.feedback_type == FeedbackType.REACTION_CENTER:
+            result = self.backend.reaction_center(
+                product,
+                candidates,
+            )
+            text = self._format_reaction_center(
+                result.content
+            )
+
+        else:
+            result = self.backend.bond_disconnection(
+                product,
+                candidates,
+            )
+            text = self._format_bond_disconnection(
+                result.content
+            )
+
+        return self._make_result(
+            text=text,
+            backend_result=result,
+            feedback_type=query.feedback_type,
         )
 
-        product = (
-            context.selected_molecule
+    @staticmethod
+    def _format_activity(
+        data: Any,
+    ) -> str:
+
+        if isinstance(data, str):
+            return data
+
+        if isinstance(data, Mapping):
+
+            assessment = (
+                data.get("activity")
+                or data.get("assessment")
+                or data.get("label")
+            )
+
+            score = data.get("score")
+
+            if assessment is not None:
+                text = (
+                    f"The local functional-group reactivity "
+                    f"is assessed as {assessment}."
+                )
+
+                if score is not None:
+                    text += (
+                        f" The associated round-trip score "
+                        f"is {float(score):.3f}."
+                    )
+
+                return text
+
+            if score is not None:
+                return (
+                    "The current product receives a local "
+                    f"reactivity score of {float(score):.3f}."
+                )
+
+        if isinstance(data, (int, float)):
+            return (
+                "The current product receives a local "
+                f"reactivity score of {float(data):.3f}."
+            )
+
+        return (
+            "The structural backend identified plausible "
+            f"local reactivity evidence: {data}."
         )
 
-        candidates = (
-            context.candidates
+    @staticmethod
+    def _format_reaction_class(
+        data: Any,
+    ) -> str:
+
+        if isinstance(data, str):
+            return (
+                f"A plausible reaction class for the current "
+                f"product is {data}."
+            )
+
+        if isinstance(data, Mapping):
+
+            label = (
+                data.get("reaction_class")
+                or data.get("class")
+                or data.get("label")
+            )
+
+            score = data.get("score")
+
+            if label is not None:
+                text = (
+                    f"A plausible reaction class for the "
+                    f"current product is {label}."
+                )
+
+                if score is not None:
+                    text += (
+                        f" Its round-trip support score "
+                        f"is {float(score):.3f}."
+                    )
+
+                return text
+
+        if isinstance(data, (int, float)):
+            return (
+                "The round-trip backend returned a reaction-class "
+                f"support score of {float(data):.3f}."
+            )
+
+        return (
+            "The structural backend returned reaction-class "
+            f"evidence: {data}."
         )
 
-        operation = {
-            "activity_assessment":
-                self.backend
-                .activity_assessment,
+    @staticmethod
+    def _format_reaction_center(
+        data: Any,
+    ) -> str:
 
-            "reaction_class":
-                self.backend
-                .reaction_class,
+        if isinstance(data, str):
+            return data
 
-            "reaction_center":
-                self.backend
-                .reaction_center,
+        if isinstance(data, Mapping):
 
-            "bond_disconnection":
-                self.backend
-                .bond_disconnection,
-        }[
-            query.feedback_type
-        ]
+            center = (
+                data.get("reaction_center")
+                or data.get("center")
+                or data.get("atom_indices")
+                or data.get("atoms")
+            )
 
-        return operation(
-            product,
-            candidates,
+            score = data.get("score")
+
+            if center is not None:
+                text = (
+                    "A plausible reaction center involves "
+                    f"{center}."
+                )
+
+                if score is not None:
+                    text += (
+                        f" Its round-trip support score "
+                        f"is {float(score):.3f}."
+                    )
+
+                return text
+
+        if isinstance(data, (int, float)):
+            return (
+                "The round-trip backend returned a "
+                f"reaction-center score of {float(data):.3f}."
+            )
+
+        return (
+            "The structural backend identified the following "
+            f"reaction-center evidence: {data}."
+        )
+
+    @staticmethod
+    def _format_bond_disconnection(
+        data: Any,
+    ) -> str:
+
+        if isinstance(data, str):
+            return data
+
+        if isinstance(data, Mapping):
+
+            bond = (
+                data.get("bond")
+                or data.get("bond_indices")
+                or data.get("disconnection")
+            )
+
+            score = data.get("score")
+
+            if bond is not None:
+                text = (
+                    "A plausible retrosynthetic disconnection "
+                    f"is associated with bond {bond}."
+                )
+
+                if score is not None:
+                    text += (
+                        f" Its round-trip support score "
+                        f"is {float(score):.3f}."
+                    )
+
+                return text
+
+        if isinstance(data, (int, float)):
+            return (
+                "The round-trip backend returned a bond-"
+                f"disconnection score of {float(data):.3f}."
+            )
+
+        return (
+            "The structural backend returned plausible "
+            f"bond-disconnection evidence: {data}."
+        )
+
+    @staticmethod
+    def _make_result(
+        *,
+        text: str,
+        backend_result: BackendResult,
+        feedback_type: FeedbackType,
+    ) -> OracleResult:
+
+        metadata = dict(
+            backend_result.metadata
+        )
+
+        metadata["feedback_type"] = (
+            feedback_type.value
+        )
+
+        return OracleResult(
+            content=text,
+            complexity_score=(
+                backend_result.complexity_score
+            ),
+            metadata=metadata,
         )

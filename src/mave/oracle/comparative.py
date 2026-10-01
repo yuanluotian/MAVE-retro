@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from itertools import combinations
+from typing import Any, Mapping, Sequence
 
-from mave.core.types import (
-    FeedbackLevel,
-    FeedbackQuery,
-)
+from mave.chemistry.reaction import Reaction
+from mave.chemistry.route import SynthesisRoute
 from mave.oracle.base import (
-    BackendResult,
     FeedbackOracle,
+    FeedbackQuery,
+    FeedbackType,
     OracleContext,
+    OracleResult,
 )
 from mave.oracle.backends.round_trip import (
     RoundTripBackend,
@@ -22,177 +22,52 @@ from mave.oracle.registry import (
 )
 
 
-@register_oracle(
-    "comparative"
-)
-class ComparativeOracle(
-    FeedbackOracle
-):
+@register_oracle("comparative")
+class ComparativeOracle(FeedbackOracle):
     """
     L3 comparative feedback.
 
-    reaction_comparison:
-        compare two candidate reactions using predicted yield.
+    Reaction comparison:
+        compare predicted yields.
 
-    route_comparison:
-        compare two partial synthesis routes using the common
-        round-trip backend.
+    Route comparison:
+        compare round-trip route scores.
     """
 
-    level = FeedbackLevel.L3
+    supported_types = frozenset({
+        FeedbackType.REACTION_COMPARISON,
+        FeedbackType.ROUTE_COMPARISON,
+    })
 
     def __init__(
         self,
         *,
         yield_backend: YieldModelBackend,
-        round_trip_backend: (
-            RoundTripBackend
-        ),
-        comparison_pool_size: (
-            int | None
-        ) = 5,
+        round_trip_backend: RoundTripBackend,
     ) -> None:
 
-        self.yield_backend = (
-            yield_backend
-        )
+        self.yield_backend = yield_backend
+        self.round_trip_backend = round_trip_backend
 
-        self.round_trip_backend = (
-            round_trip_backend
-        )
-
-        # Paper does not specify how many candidate pairs are
-        # exposed to the escalation policy.
-        self.comparison_pool_size = (
-            comparison_pool_size
-        )
-
-    @property
-    def feedback_types(
+    def query(
         self,
-    ) -> tuple[str, ...]:
-        return (
-            "reaction_comparison",
-            "route_comparison",
-        )
-
-    def available_queries(
-        self,
-        context: OracleContext,
-    ) -> tuple[
-        FeedbackQuery,
-        ...
-    ]:
-
-        queries: list[
-            FeedbackQuery
-        ] = []
-
-        # ----------------------------------------------------
-        # Reaction comparisons
-        # ----------------------------------------------------
-
-        num_candidates = len(
-            context.candidates
-        )
-
-        if (
-            self.comparison_pool_size
-            is None
-        ):
-            pool_size = (
-                num_candidates
-            )
-
-        else:
-            pool_size = min(
-                num_candidates,
-                self.comparison_pool_size,
-            )
-
-        for i, j in combinations(
-            range(pool_size),
-            2,
-        ):
-            queries.append(
-                FeedbackQuery(
-                    level=self.level,
-                    feedback_type=(
-                        "reaction_comparison"
-                    ),
-                    payload={
-                        "reaction_indices":
-                            [i, j],
-                    },
-                )
-            )
-
-        # ----------------------------------------------------
-        # Route comparisons
-        # ----------------------------------------------------
-
-        routes = (
-            context.state.route,
-            *context.route_alternatives,
-        )
-
-        for i, j in combinations(
-            range(len(routes)),
-            2,
-        ):
-            queries.append(
-                FeedbackQuery(
-                    level=self.level,
-                    feedback_type=(
-                        "route_comparison"
-                    ),
-                    payload={
-                        "route_indices":
-                            [i, j],
-                    },
-                )
-            )
-
-        return tuple(queries)
-
-    # ========================================================
-    # Evaluation
-    # ========================================================
-
-    def evaluate(
-        self,
-        context: OracleContext,
         query: FeedbackQuery,
-    ) -> BackendResult:
+        context: OracleContext,
+    ) -> OracleResult:
 
-        self.validate_query(
-            query
-        )
-
-        if (
-            query.feedback_type
-            == "reaction_comparison"
-        ):
-            return (
-                self._compare_reactions(
-                    context,
-                    query,
-                )
+        if query.feedback_type == FeedbackType.REACTION_COMPARISON:
+            return self._compare_reactions(
+                query
             )
 
-        if (
-            query.feedback_type
-            == "route_comparison"
-        ):
-            return (
-                self._compare_routes(
-                    context,
-                    query,
-                )
+        if query.feedback_type == FeedbackType.ROUTE_COMPARISON:
+            return self._compare_routes(
+                query
             )
 
-        raise RuntimeError(
-            "Unreachable feedback type."
+        raise ValueError(
+            f"Unsupported comparative feedback type: "
+            f"{query.feedback_type.value}"
         )
 
     # ========================================================
@@ -201,91 +76,83 @@ class ComparativeOracle(
 
     def _compare_reactions(
         self,
-        context: OracleContext,
         query: FeedbackQuery,
-    ) -> BackendResult:
+    ) -> OracleResult:
 
-        i, j = [
-            int(value)
-            for value
-            in query.payload[
-                "reaction_indices"
-            ]
-        ]
-
-        reaction_i = (
-            context.candidates[i]
-        )
-
-        reaction_j = (
-            context.candidates[j]
-        )
-
-        result_i = (
-            self.yield_backend.predict(
-                reaction_i
+        reaction_a, reaction_b = (
+            self._require_pair(
+                query.alternatives,
+                Reaction,
+                "reaction",
             )
         )
 
-        result_j = (
+        result_a = (
             self.yield_backend.predict(
-                reaction_j
+                reaction_a
             )
         )
 
-        yield_i = float(
-            result_i.content
+        result_b = (
+            self.yield_backend.predict(
+                reaction_b
+            )
         )
 
-        yield_j = float(
-            result_j.content
+        score_a = float(
+            result_a.content
         )
 
-        if yield_i > yield_j:
-            preferred = i
+        score_b = float(
+            result_b.content
+        )
 
-        elif yield_j > yield_i:
-            preferred = j
+        if score_a > score_b:
+
+            conclusion = (
+                "Candidate reaction 1 receives stronger "
+                "yield-based support."
+            )
+
+        elif score_b > score_a:
+
+            conclusion = (
+                "Candidate reaction 2 receives stronger "
+                "yield-based support."
+            )
 
         else:
-            preferred = None
 
-        complexity_values = [
-            value
-            for value in (
-                result_i.complexity_score,
-                result_j.complexity_score,
+            conclusion = (
+                "The two candidate reactions receive "
+                "equal yield-based support."
             )
-            if value is not None
-        ]
 
-        complexity = (
-            None
-            if not complexity_values
-            else sum(
-                complexity_values
-            ) / len(
-                complexity_values
-            )
+        text = (
+            "Candidate reaction 1 has a predicted normalized "
+            f"yield of {score_a:.3f}, while candidate reaction 2 "
+            f"has a predicted normalized yield of {score_b:.3f}. "
+            f"{conclusion}"
         )
 
-        return BackendResult(
-            content={
-                "reaction_a": i,
-                "reaction_b": j,
-                "yield_a": yield_i,
-                "yield_b": yield_j,
-                "preferred_reaction": (
-                    preferred
-                ),
-            },
+        return OracleResult(
+            content=text,
+
             complexity_score=(
-                complexity
+                self._mean_complexity(
+                    result_a.complexity_score,
+                    result_b.complexity_score,
+                )
             ),
+
             metadata={
-                "backend": (
-                    "yield_model"
-                ),
+                "feedback_type":
+                    FeedbackType
+                    .REACTION_COMPARISON
+                    .value,
+
+                "backend":
+                    "yield_model",
             },
         )
 
@@ -295,89 +162,169 @@ class ComparativeOracle(
 
     def _compare_routes(
         self,
-        context: OracleContext,
         query: FeedbackQuery,
-    ) -> BackendResult:
+    ) -> OracleResult:
 
-        routes = (
-            context.state.route,
-            *context.route_alternatives,
-        )
-
-        i, j = [
-            int(value)
-            for value
-            in query.payload[
-                "route_indices"
-            ]
-        ]
-
-        result_i = (
-            self.round_trip_backend
-            .route_score(
-                routes[i]
+        route_a, route_b = (
+            self._require_pair(
+                query.alternatives,
+                SynthesisRoute,
+                "route",
             )
         )
 
-        result_j = (
+        result_a = (
             self.round_trip_backend
             .route_score(
-                routes[j]
+                route_a
             )
         )
 
-        score_i = float(
-            result_i.content
+        result_b = (
+            self.round_trip_backend
+            .route_score(
+                route_b
+            )
         )
 
-        score_j = float(
-            result_j.content
+        score_a = self._extract_score(
+            result_a.content
         )
 
-        if score_i > score_j:
-            preferred = i
+        score_b = self._extract_score(
+            result_b.content
+        )
 
-        elif score_j > score_i:
-            preferred = j
+        if score_a > score_b:
+
+            conclusion = (
+                "Partial route 1 receives stronger "
+                "round-trip support."
+            )
+
+        elif score_b > score_a:
+
+            conclusion = (
+                "Partial route 2 receives stronger "
+                "round-trip support."
+            )
 
         else:
-            preferred = None
 
-        complexity_values = [
-            value
-            for value in (
-                result_i.complexity_score,
-                result_j.complexity_score,
+            conclusion = (
+                "The two partial routes receive equal "
+                "round-trip support."
             )
+
+        text = (
+            "Partial route 1 has a round-trip score of "
+            f"{score_a:.3f}, while partial route 2 has a "
+            f"score of {score_b:.3f}. {conclusion}"
+        )
+
+        return OracleResult(
+            content=text,
+
+            complexity_score=(
+                self._mean_complexity(
+                    result_a.complexity_score,
+                    result_b.complexity_score,
+                )
+            ),
+
+            metadata={
+                "feedback_type":
+                    FeedbackType
+                    .ROUTE_COMPARISON
+                    .value,
+
+                "backend":
+                    "round_trip",
+            },
+        )
+
+    # ========================================================
+    # Helpers
+    # ========================================================
+
+    @staticmethod
+    def _require_pair(
+        values: Sequence[Any],
+        expected_type: type,
+        name: str,
+    ) -> tuple[Any, Any]:
+
+        if len(values) != 2:
+
+            raise ValueError(
+                f"{name.capitalize()} comparison "
+                f"requires exactly two alternatives."
+            )
+
+        a, b = values
+
+        if not isinstance(
+            a,
+            expected_type,
+        ) or not isinstance(
+            b,
+            expected_type,
+        ):
+            raise TypeError(
+                f"Both alternatives must be "
+                f"{expected_type.__name__} objects."
+            )
+
+        return a, b
+
+    @staticmethod
+    def _extract_score(
+        content: Any,
+    ) -> float:
+
+        if isinstance(
+            content,
+            (int, float),
+        ):
+            return float(content)
+
+        if isinstance(
+            content,
+            Mapping,
+        ):
+
+            for key in (
+                "score",
+                "route_score",
+                "value",
+            ):
+
+                if key in content:
+                    return float(
+                        content[key]
+                    )
+
+        raise TypeError(
+            "Route backend output must contain "
+            "a scalar score."
+        )
+
+    @staticmethod
+    def _mean_complexity(
+        *values: float | None,
+    ) -> float | None:
+
+        available = [
+            float(value)
+            for value in values
             if value is not None
         ]
 
-        complexity = (
-            None
-            if not complexity_values
-            else sum(
-                complexity_values
-            ) / len(
-                complexity_values
-            )
-        )
+        if not available:
+            return None
 
-        return BackendResult(
-            content={
-                "route_a": i,
-                "route_b": j,
-                "score_a": score_i,
-                "score_b": score_j,
-                "preferred_route": (
-                    preferred
-                ),
-            },
-            complexity_score=(
-                complexity
-            ),
-            metadata={
-                "backend": (
-                    "round_trip"
-                ),
-            },
+        return sum(
+            available
+        ) / len(
+            available
         )
