@@ -12,6 +12,7 @@ from mave.chemistry.reaction import Reaction
 from mave.environment.purchasable import PurchasableDatabase
 from mave.models.single_step import SingleStepModel
 from mave.oracle.base import BackendResult, OracleContext
+from mave.oracle.context import native_candidates, native_selected_molecule
 from mave.oracle.registry import register_backend
 
 
@@ -517,14 +518,14 @@ class DepthLimitedTraversalBackend(
         return (
             context.state.state_id,
 
-            context.selected_index,
+            context.selected_molecule,
 
             tuple(
                 str(
                     reaction.key
                 )
                 for reaction
-                in context.candidates
+                in native_candidates(context)
             ),
 
             self.config.max_depth,
@@ -560,7 +561,7 @@ class DepthLimitedTraversalBackend(
         root = (
             self.purchasable_db
             .annotate(
-                context.selected_molecule
+                native_selected_molecule(context)
             )
         )
 
@@ -1080,10 +1081,9 @@ class DepthLimitedTraversalBackend(
         # Reuse them without another single-step call.
         # ----------------------------------------------------
 
-        if (
-            use_root_candidates
-            and context.candidates
-        ):
+        root_candidates = native_candidates(context)
+
+        if use_root_candidates and root_candidates:
 
             stats.expanded_molecules += 1
 
@@ -1091,7 +1091,7 @@ class DepthLimitedTraversalBackend(
                 reactions=(
                     self._deduplicate(
                         tuple(
-                            context.candidates[
+                            root_candidates[
                                 :
                                 self.config
                                 .top_k_per_node

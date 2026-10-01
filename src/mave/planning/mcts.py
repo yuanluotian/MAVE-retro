@@ -26,8 +26,8 @@ from mave.models.reaction_policy import (
 
 from mave.oracle.base import (
     MultiFidelityOracleSystem,
-    OracleContext,
 )
+from mave.oracle.context import build_oracle_context
 
 from mave.planning.and_or_tree import (
     AndOrTree,
@@ -352,19 +352,12 @@ class MCTSPlanner:
                 .max_feedback_level
             ):
 
-                oracle_context = (
-                    OracleContext(
-                        state=state,
-                        selected_index=(
-                            selected_index
-                        ),
-                        candidates=(
-                            candidates
-                        ),
-                        feedback_history=tuple(
-                            feedback
-                        ),
-                    )
+                oracle_context = build_oracle_context(
+                    state=state,
+                    selected_index=selected_index,
+                    candidates=candidates,
+                    current_level=current_level,
+                    feedback_history=feedback,
                 )
 
                 available_queries = (
@@ -434,8 +427,8 @@ class MCTSPlanner:
                     break
 
                 result = self.oracle.query(
-                    oracle_context,
                     query,
+                    oracle_context,
                 )
 
                 feedback_queries += 1

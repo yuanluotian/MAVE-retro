@@ -55,17 +55,6 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--provider-factory",
-        default=None,
-        help=(
-            "Optional provider builder in "
-            "'module:function' format. "
-            "Each budget is assembled through "
-            "prepare_system()."
-        ),
-    )
-
-    parser.add_argument(
         "--method",
         default="MAVE",
     )
@@ -152,9 +141,6 @@ def main() -> None:
             targets=targets,
             method_name=(
                 args.method
-            ),
-            provider_factory=(
-                args.provider_factory
             ),
         )
 

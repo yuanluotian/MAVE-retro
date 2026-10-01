@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from mave.environment.purchasable import (
     InMemoryPurchasableDatabase,
@@ -61,6 +60,7 @@ from mave.training.collector import (
     EscalationGroupCollector,
     ReactionGroupCollector,
 )
+from mave.training.parameter_isolation import ensure_disjoint_parameters
 
 
 # ============================================================
@@ -87,22 +87,16 @@ class SystemPreparationError(RuntimeError):
 class SystemProviders:
     """
     Concrete experiment-specific components supplied to the official MAVE
-    implementation through its provider interface.
+    implementation through explicit in-process placeholders.
 
     The MAVE repository defines stable interfaces for these components.
     Datasets, licensed assets, and pretrained checkpoints for the Chen-style
     single-step model, the round-trip model, and the yield model are connected
     here by the experiment provider module.
 
-    A provider module should construct this dataclass and return it from a
-    function such as:
-
-        def prepare_providers(config) -> SystemProviders:
-            ...
-
-    The system assembly itself remains in prepare_system(); provider code
-    should load models/data only and should not duplicate planner/oracle
-    wiring.
+    Fields may remain ``None`` while experiment assets are unavailable. The
+    system assembly remains in prepare_system(), which raises a focused error
+    when execution reaches a component whose concrete asset is still absent.
     """
 
     # --------------------------------------------------------
@@ -117,10 +111,18 @@ class SystemProviders:
     single_step_model: SingleStepModel | None = None
 
     # --------------------------------------------------------
-    # Optional preconstructed shared/frozen LLMs
+    # Optional preconstructed policy/reference LLMs
     # --------------------------------------------------------
 
+    escalation_backbone: LLMBackbone | None = None
+    reaction_backbone: LLMBackbone | None = None
+
+    # Deprecated shared trainable backbone. It remains as an explicit error
+    # path so existing provider modules fail with a migration message instead
+    # of silently violating the alternating-optimization contract.
     backbone: LLMBackbone | None = None
+
+    # The two reference policies may share this backbone because it is frozen.
     reference_backbone: LLMBackbone | None = None
 
     # --------------------------------------------------------
@@ -151,12 +153,6 @@ class SystemProviders:
     checkpointables: Mapping[str, Any] = field(default_factory=dict)
 
 
-ProviderFactory = Callable[
-    [Mapping[str, Any]],
-    SystemProviders,
-]
-
-
 # ============================================================
 # Prepared system
 # ============================================================
@@ -173,7 +169,8 @@ class MAVESystem:
 
     config: Mapping[str, Any]
 
-    backbone: LLMBackbone
+    escalation_backbone: LLMBackbone
+    reaction_backbone: LLMBackbone
     single_step_model: SingleStepModel
     purchasable_db: PurchasableDatabase
     reward_fn: RewardFunction
@@ -203,14 +200,37 @@ class MAVESystem:
 
     checkpointables: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if self.escalation_policy.backbone is not self.escalation_backbone:
+            raise ValueError(
+                "escalation_policy must use escalation_backbone."
+            )
+
+        if self.reaction_policy.backbone is not self.reaction_backbone:
+            raise ValueError(
+                "reaction_policy must use reaction_backbone."
+            )
+
+        ensure_disjoint_parameters(
+            self.escalation_trainable_parameters,
+            self.reaction_trainable_parameters,
+        )
+
     @property
     def escalation_trainable_parameters(self):
-        return self.backbone.parameters()
+        return tuple(
+            parameter
+            for parameter in self.escalation_backbone.parameters()
+            if parameter.requires_grad
+        )
 
     @property
     def reaction_trainable_parameters(self):
-        # mu and pi share the same paper-specified Llama backbone.
-        return self.backbone.parameters()
+        return tuple(
+            parameter
+            for parameter in self.reaction_backbone.parameters()
+            if parameter.requires_grad
+        )
 
     def require_training_ready(self) -> None:
         """
@@ -231,6 +251,12 @@ class MAVESystem:
         if self.reaction_batch_provider is None:
             missing.append("reaction_batch_provider")
 
+        if not self.escalation_trainable_parameters:
+            missing.append("escalation_trainable_parameters")
+
+        if not self.reaction_trainable_parameters:
+            missing.append("reaction_trainable_parameters")
+
         if missing:
             raise SystemPreparationError(
                 "Training system is incomplete. Missing: "
@@ -250,7 +276,6 @@ def prepare_system(
     config: Mapping[str, Any],
     *,
     providers: SystemProviders | None = None,
-    provider_factory: str | ProviderFactory | None = None,
 ) -> MAVESystem:
     """
     Construct and connect the complete MAVE planning system.
@@ -262,30 +287,22 @@ def prepare_system(
         scripts/evaluate.py.
 
     providers:
-        Concrete external model/data providers. Programmatic callers can pass
-        them directly.
-
-    provider_factory:
-        Optional callable or ``"module:function"`` specification that returns
-        SystemProviders. This is useful for command-line scripts.
+        Optional in-process experiment assets. Omitted fields remain explicit
+        placeholders and fail only when their component is constructed.
 
     Assembly order
     --------------
     1. external model providers
     2. purchasable database and reward function
     3. single-step model and retrosynthesis environment
-    4. shared LLM backbone and mu/pi policies
+    4. independent trainable LLM backbones for mu and pi
     5. natural-language query factory
     6. L1-L4 oracle hierarchy, cost model, and cache
     7. MCTS inference planner
     8. rollout/collection interfaces used during training
     """
 
-    providers = _resolve_providers(
-        config=config,
-        providers=providers,
-        provider_factory=provider_factory,
-    )
+    providers = providers or SystemProviders()
 
     base_cfg = _section(config, "base")
     model_cfg = _section(config, "model")
@@ -343,16 +360,16 @@ def prepare_system(
     )
 
     # --------------------------------------------------------
-    # 4. Shared language-model policies
+    # 4. Parameter-isolated language-model policies
     # --------------------------------------------------------
 
-    backbone = (
-        providers.backbone
-        if providers.backbone is not None
-        else _prepare_backbone(
-            base_cfg=base_cfg,
-            model_cfg=model_cfg,
-        )
+    (
+        escalation_backbone,
+        reaction_backbone,
+    ) = _prepare_policy_backbones(
+        base_cfg=base_cfg,
+        model_cfg=model_cfg,
+        providers=providers,
     )
 
     policy_temperature = _policy_temperature(
@@ -369,13 +386,13 @@ def prepare_system(
     )
 
     escalation_policy = EscalationPolicy(
-        backbone,
+        escalation_backbone,
         temperature=policy_temperature,
         normalize_completion_logprob=normalize_completion_logprob,
     )
 
     reaction_policy = ReactionPolicy(
-        backbone,
+        reaction_backbone,
         temperature=policy_temperature,
         normalize_completion_logprob=normalize_completion_logprob,
     )
@@ -385,6 +402,8 @@ def prepare_system(
         reference_reaction_policy,
     ) = _prepare_reference_policies(
         providers=providers,
+        escalation_backbone=escalation_backbone,
+        reaction_backbone=reaction_backbone,
         temperature=policy_temperature,
         normalize_completion_logprob=normalize_completion_logprob,
     )
@@ -546,13 +565,19 @@ def prepare_system(
     )
 
     checkpointables.setdefault(
-        "shared_backbone",
-        backbone,
+        "escalation_backbone",
+        escalation_backbone,
+    )
+
+    checkpointables.setdefault(
+        "reaction_backbone",
+        reaction_backbone,
     )
 
     return MAVESystem(
         config=config,
-        backbone=backbone,
+        escalation_backbone=escalation_backbone,
+        reaction_backbone=reaction_backbone,
         single_step_model=single_step_model,
         purchasable_db=purchasable_db,
         reward_fn=reward_fn,
@@ -574,111 +599,6 @@ def prepare_system(
         difficulty_labels=providers.difficulty_labels,
         checkpointables=checkpointables,
     )
-
-
-# ============================================================
-# Provider loading
-# ============================================================
-
-
-def load_provider_factory(
-    spec: str,
-) -> ProviderFactory:
-    """
-    Load ``module:function`` returning SystemProviders.
-    """
-
-    if ":" not in spec:
-        raise ValueError(
-            "Provider factory must use 'module:function' format."
-        )
-
-    module_name, function_name = spec.split(
-        ":",
-        maxsplit=1,
-    )
-
-    module = importlib.import_module(
-        module_name
-    )
-
-    factory = getattr(
-        module,
-        function_name,
-    )
-
-    if not callable(factory):
-        raise TypeError(
-            f"{spec!r} is not callable."
-        )
-
-    return factory
-
-
-def _resolve_providers(
-    *,
-    config: Mapping[str, Any],
-    providers: SystemProviders | None,
-    provider_factory: str | ProviderFactory | None,
-) -> SystemProviders:
-    if providers is not None and provider_factory is not None:
-        raise ValueError(
-            "Pass either providers or provider_factory, not both."
-        )
-
-    if providers is not None:
-        return providers
-
-    factory: ProviderFactory | None = None
-
-    if callable(provider_factory):
-        factory = provider_factory
-
-    elif isinstance(provider_factory, str):
-        factory = load_provider_factory(
-            provider_factory
-        )
-
-    else:
-        interface_cfg = _section(
-            config,
-            "interface",
-            required=False,
-        )
-
-        configured = interface_cfg.get(
-            "provider_factory"
-        )
-
-        if configured:
-            factory = load_provider_factory(
-                str(configured)
-            )
-
-    if factory is None:
-        raise SystemPreparationError(
-            "No concrete experiment providers were supplied. "
-            "Pass providers=SystemProviders(...) or set "
-            "interface.provider_factory='module:function'. "
-            "The official implementation keeps experiment-specific datasets, "
-            "licensed assets, and pretrained model checkpoints behind this "
-            "provider interface."
-        )
-
-    prepared = factory(
-        config
-    )
-
-    if not isinstance(
-        prepared,
-        SystemProviders,
-    ):
-        raise TypeError(
-            "Provider factory must return SystemProviders, "
-            f"got {type(prepared)!r}."
-        )
-
-    return prepared
 
 
 # ============================================================
@@ -963,9 +883,76 @@ def _prepare_backbone(
     )
 
 
+def _prepare_policy_backbones(
+    *,
+    base_cfg: Mapping[str, Any],
+    model_cfg: Mapping[str, Any],
+    providers: SystemProviders,
+) -> tuple[LLMBackbone, LLMBackbone]:
+    shared_backbone = bool(
+        _get(
+            model_cfg,
+            "policies",
+            "shared_backbone",
+            default=False,
+        )
+    )
+
+    if shared_backbone:
+        raise SystemPreparationError(
+            "policies.shared_backbone=true is incompatible with the paper's "
+            "alternating optimization: mu and pi require disjoint trainable "
+            "parameters. Set it to false."
+        )
+
+    if providers.backbone is not None:
+        raise SystemPreparationError(
+            "SystemProviders.backbone is a deprecated shared trainable "
+            "backbone. Supply escalation_backbone and reaction_backbone "
+            "separately."
+        )
+
+    escalation_backbone = (
+        providers.escalation_backbone
+        if providers.escalation_backbone is not None
+        else _prepare_backbone(
+            base_cfg=base_cfg,
+            model_cfg=model_cfg,
+        )
+    )
+    reaction_backbone = (
+        providers.reaction_backbone
+        if providers.reaction_backbone is not None
+        else _prepare_backbone(
+            base_cfg=base_cfg,
+            model_cfg=model_cfg,
+        )
+    )
+
+    try:
+        ensure_disjoint_parameters(
+            (
+                parameter
+                for parameter in escalation_backbone.parameters()
+                if parameter.requires_grad
+            ),
+            (
+                parameter
+                for parameter in reaction_backbone.parameters()
+                if parameter.requires_grad
+            ),
+        )
+    except ValueError as error:
+        raise SystemPreparationError(str(error)) from error
+
+    return escalation_backbone, reaction_backbone
+
+
 def _prepare_reference_policies(
     *,
     providers: SystemProviders,
+    escalation_backbone: LLMBackbone,
+    reaction_backbone: LLMBackbone,
     temperature: float,
     normalize_completion_logprob: bool,
 ) -> tuple[
@@ -978,6 +965,25 @@ def _prepare_reference_policies(
 
     if reference_backbone is None:
         return None, None
+
+    reference_parameter_ids = {
+        id(parameter)
+        for parameter in reference_backbone.parameters()
+    }
+    trainable_parameter_ids = {
+        id(parameter)
+        for backbone in (
+            escalation_backbone,
+            reaction_backbone,
+        )
+        for parameter in backbone.parameters()
+    }
+
+    if reference_parameter_ids.intersection(trainable_parameter_ids):
+        raise SystemPreparationError(
+            "reference_backbone must not share parameter objects with either "
+            "trainable policy backbone."
+        )
 
     reference_backbone.freeze()
     reference_backbone.eval()

@@ -153,14 +153,10 @@ def evaluate_once(
     config: dict[str, Any],
     targets: list[str],
     method_name: str,
-    provider_factory: str | None = None,
 ) -> dict[str, Any]:
 
     system = prepare_system(
-        config,
-        provider_factory=(
-            provider_factory
-        ),
+        config
     )
 
     eval_cfg = (
@@ -294,16 +290,6 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--provider-factory",
-        default=None,
-        help=(
-            "Optional provider builder in "
-            "'module:function' format. "
-            "prepare_system() constructs the system."
-        ),
-    )
-
-    parser.add_argument(
         "--method",
         default="MAVE",
     )
@@ -370,9 +356,6 @@ def main() -> None:
         targets=targets,
         method_name=(
             args.method
-        ),
-        provider_factory=(
-            args.provider_factory
         ),
     )
 

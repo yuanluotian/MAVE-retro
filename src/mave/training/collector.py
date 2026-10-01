@@ -12,7 +12,6 @@ from mave.core.types import (
     Feedback,
     FeedbackLevel,
     FeedbackQuery,
-    ReactionCandidate,
     ReactionDecision,
     RolloutGroup,
 )
@@ -28,8 +27,8 @@ from mave.models.reaction_policy import (
 
 from mave.oracle.base import (
     MultiFidelityOracleSystem,
-    OracleContext,
 )
+from mave.oracle.context import build_oracle_context, reaction_to_candidate
 
 from mave.planning.rollout import (
     PlanningRolloutRunner,
@@ -159,41 +158,6 @@ class ReactionTrainingGroup:
         ReactionPolicyStep,
         ...
     ]
-
-
-# ============================================================
-# Helpers
-# ============================================================
-
-
-def reaction_to_candidate(
-    reaction: Reaction,
-) -> ReactionCandidate:
-
-    return ReactionCandidate(
-        product_smiles=(
-            reaction.product_smiles
-        ),
-        reactant_smiles=(
-            reaction.reactant_smiles
-        ),
-        single_step_score=(
-            0.0
-            if reaction.score is None
-            else float(
-                reaction.score
-            )
-        ),
-        template_id=(
-            reaction.template_id
-        ),
-        reaction_id=(
-            reaction.reaction_id
-        ),
-        metadata=dict(
-            reaction.metadata
-        ),
-    )
 
 
 # ============================================================
@@ -379,17 +343,13 @@ class EscalationGroupCollector:
             < self.max_feedback_level
         ):
 
-            oracle_context = (
-                OracleContext(
-                    state=state,
-                    selected_index=(
-                        selected_index
-                    ),
-                    candidates=candidates,
-                    feedback_history=tuple(
-                        feedback
-                    ),
-                )
+            oracle_context = build_oracle_context(
+                state=state,
+                selected_index=selected_index,
+                candidates=candidates,
+                current_level=current_level,
+                feedback_history=feedback,
+                context_id=context_id,
             )
 
             available_queries = (
@@ -454,8 +414,8 @@ class EscalationGroupCollector:
                 )
 
             result = self.oracle.query(
-                oracle_context,
                 query,
+                oracle_context,
             )
 
             feedback.append(

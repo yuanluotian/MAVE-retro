@@ -39,14 +39,13 @@ class CompletionScore:
 @MODEL_REGISTRY.register("llama3_8b_instruct")
 class LLMBackbone:
     """
-    Shared causal-LM backbone for escalation policy mu and
-    reaction policy pi.
+    Causal-LM backbone used by one trainable policy.
 
     The paper specifies Llama-3-8B-Instruct as the backbone but
     does not specify the exact prompt templates, parameter-
     efficient fine-tuning scheme, or classification head.
 
-    This reproduction therefore treats both policies as
+    This reproduction therefore treats each policy as a
     constrained-choice language-model policies:
         prompt + candidate completion -> sequence log-probability.
     """

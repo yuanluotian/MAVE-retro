@@ -11,6 +11,11 @@ from mave.training.collector import (
     CollectedEscalationGroup,
     ReactionTrainingGroup,
 )
+from mave.training.parameter_isolation import (
+    activate_parameter_set,
+    ensure_disjoint_parameters,
+    optimizer_parameters,
+)
 
 from mave.training.train_escalation import (
     EscalationTrainer,
@@ -170,6 +175,18 @@ class AlternatingTrainer:
 
         self.config = config
 
+        (
+            self._escalation_parameters,
+            self._reaction_parameters,
+        ) = ensure_disjoint_parameters(
+            optimizer_parameters(
+                escalation_trainer.optimizer
+            ),
+            optimizer_parameters(
+                reaction_trainer.optimizer
+            ),
+        )
+
     # ========================================================
     # Phase selection
     # ========================================================
@@ -216,6 +233,10 @@ class AlternatingTrainer:
 
         phase = self.phase_for_epoch(
             epoch
+        )
+
+        self._activate_phase(
+            phase
         )
 
         if (
@@ -267,6 +288,22 @@ class AlternatingTrainer:
             epoch=epoch,
             phase=phase,
             reaction_stats=stats,
+        )
+
+    def _activate_phase(
+        self,
+        phase: TrainingPhase,
+    ) -> None:
+        if phase == TrainingPhase.ESCALATION:
+            activate_parameter_set(
+                active=self._escalation_parameters,
+                inactive=self._reaction_parameters,
+            )
+            return
+
+        activate_parameter_set(
+            active=self._reaction_parameters,
+            inactive=self._escalation_parameters,
         )
 
     # ========================================================

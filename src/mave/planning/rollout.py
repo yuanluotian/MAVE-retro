@@ -32,8 +32,8 @@ from mave.models.reaction_policy import (
 
 from mave.oracle.base import (
     MultiFidelityOracleSystem,
-    OracleContext,
 )
+from mave.oracle.context import build_oracle_context
 
 
 # ============================================================
@@ -504,17 +504,12 @@ class PlanningRolloutRunner:
             .max_feedback_level
         ):
 
-            context = OracleContext(
+            context = build_oracle_context(
                 state=state,
-                selected_index=(
-                    selected_index
-                ),
-                candidates=tuple(
-                    candidates
-                ),
-                feedback_history=tuple(
-                    feedback
-                ),
+                selected_index=selected_index,
+                candidates=candidates,
+                current_level=level,
+                feedback_history=feedback,
             )
 
             queries = (
@@ -585,8 +580,8 @@ class PlanningRolloutRunner:
 
             result = (
                 self.oracle.query(
-                    context,
                     query,
+                    context,
                 )
             )
 

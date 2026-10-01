@@ -7,8 +7,9 @@ Official implementation of **MAVE**, introduced in:
 This repository is the authoritative implementation accompanying the paper.
 It contains the MAVE algorithm, feedback hierarchy, training and planning
 pipelines, and evaluation code. Experiment-specific datasets, pretrained
-checkpoints, and licensed third-party model assets are configured through the
-provider interface and are not silently replaced by mock components.
+checkpoints, and licensed third-party model assets remain explicit placeholders
+until the corresponding paths or in-process components are supplied; they are
+not silently replaced by mock components.
 
 MAVE formulates feedback acquisition in retrosynthetic planning as a **sequential stop-or-escalate process**. Instead of fixing the amount of external feedback in advance, the planner progressively acquires stronger feedback and stops when the current evidence is sufficient.
 
@@ -132,9 +133,10 @@ pip install -e .
 ## System construction
 
 `mave.mave.interface.prepare_system()` is the single composition root for
-training and evaluation. A provider module supplies experiment-specific model
-and data assets by returning `SystemProviders`; it does not construct a second
-runtime or planner.
+training and evaluation. Experiment-specific assets are represented by the
+optional fields of `SystemProviders`. The command-line scripts currently leave
+those fields empty, so unavailable models or datasets produce a focused error
+at construction time instead of being dynamically imported.
 
 ## Training
 
@@ -142,7 +144,6 @@ runtime or planner.
 python scripts/train.py \
     --config-dir configs \
     --oracle hierarchy \
-    --provider-factory providers:prepare_providers \
     --output-dir outputs/train
 ```
 
@@ -154,7 +155,6 @@ Main 100-call setting:
 python scripts/evaluate.py \
     --benchmark uspto190 \
     --oracle hierarchy \
-    --provider-factory providers:prepare_providers \
     --budget 100 \
     --output outputs/eval/uspto190.json
 ```
@@ -165,7 +165,6 @@ Budget scaling:
 python scripts/eval_budget_scaling.py \
     --benchmark uspto190 \
     --oracle hierarchy \
-    --provider-factory providers:prepare_providers \
     --budgets 100 200 500 1000 \
     --output-dir outputs/budget_scaling
 ```

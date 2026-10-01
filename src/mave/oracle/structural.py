@@ -9,9 +9,14 @@ from mave.oracle.base import (
     FeedbackType,
     OracleContext,
     OracleResult,
+    coerce_feedback_type,
 )
 from mave.oracle.backends.round_trip import (
     RoundTripBackend,
+)
+from mave.oracle.context import (
+    native_candidates,
+    native_selected_molecule,
 )
 from mave.oracle.registry import (
     register_oracle,
@@ -53,8 +58,8 @@ class StructuralOracle(FeedbackOracle):
                 f"{query.feedback_type.value}"
             )
 
-        product = context.selected_molecule
-        candidates = context.candidates
+        product = native_selected_molecule(context)
+        candidates = native_candidates(context)
 
         if query.feedback_type == FeedbackType.ACTIVITY_ASSESSMENT:
             result = self.backend.activity_assessment(
@@ -285,7 +290,7 @@ class StructuralOracle(FeedbackOracle):
         *,
         text: str,
         backend_result: BackendResult,
-        feedback_type: FeedbackType,
+        feedback_type: FeedbackType | str,
     ) -> OracleResult:
 
         metadata = dict(
@@ -293,7 +298,7 @@ class StructuralOracle(FeedbackOracle):
         )
 
         metadata["feedback_type"] = (
-            feedback_type.value
+            coerce_feedback_type(feedback_type).value
         )
 
         return OracleResult(

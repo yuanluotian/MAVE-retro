@@ -13,6 +13,11 @@ from mave.oracle.base import (
     FeedbackType,
     coerce_feedback_type,
 )
+from mave.oracle.context import (
+    native_candidates,
+    native_selected_molecule,
+    native_state,
+)
 
 
 # ============================================================
@@ -228,7 +233,7 @@ class FeedbackQueryFactory:
         self,
         context: OracleContext,
     ) -> list[FeedbackQuery]:
-        selected = context.selected_molecule
+        selected = native_selected_molecule(context)
         target_ids = ("M_CURRENT",)
 
         specs = (
@@ -276,7 +281,7 @@ class FeedbackQueryFactory:
 
             payload = {
                 "selected_molecule": selected,
-                "candidates": context.candidates,
+                "candidates": native_candidates(context),
             }
 
             queries.append(
@@ -658,9 +663,9 @@ class FeedbackQueryFactory:
             query_id = f"Q_L4_{short_name}"
 
             payload = {
-                "state": context.state,
-                "selected_molecule": context.selected_molecule,
-                "candidates": context.candidates,
+                "state": native_state(context),
+                "selected_molecule": native_selected_molecule(context),
+                "candidates": native_candidates(context),
                 "context_id": context.effective_context_id,
             }
 
@@ -765,7 +770,7 @@ class FeedbackQueryFactory:
         items = [
             (index, candidate)
             for index, candidate
-            in enumerate(context.candidates)
+            in enumerate(native_candidates(context))
         ]
 
         if self.config.max_candidates is not None:

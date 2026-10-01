@@ -1,5 +1,5 @@
 # ============================================================
-# Shared LLM backbone
+# LLM backbone initialization
 # ============================================================
 
 model:
@@ -25,7 +25,9 @@ model:
 # ------------------------------------------------------------
 
 policies:
-  shared_backbone: true
+  # mu and pi start from the same pretrained checkpoint but must own
+  # disjoint trainable parameters during alternating optimization.
+  shared_backbone: false
 
   escalation:
     name: mu

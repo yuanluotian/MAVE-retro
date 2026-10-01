@@ -201,11 +201,12 @@ def make_cache_key(
     Build a deterministic key for one feedback acquisition.
     """
 
-    if query.cache_key is not None:
+    explicit_cache_key = query.metadata.get(
+        "cache_key"
+    )
 
-        return str(
-            query.cache_key
-        )
+    if explicit_cache_key is not None:
+        return str(explicit_cache_key)
 
     state_id = getattr(
         context.state,
@@ -215,8 +216,10 @@ def make_cache_key(
 
     payload = {
 
-        "feedback_type":
-            query.feedback_type.value,
+        "semantic_key":
+            _normalize(
+                query.semantic_key
+            ),
 
         "state":
             (
@@ -224,9 +227,6 @@ def make_cache_key(
                 if state_id is not None
                 else None
             ),
-
-        "selected_index":
-            context.selected_index,
 
         "selected_molecule":
             _normalize(
@@ -238,19 +238,9 @@ def make_cache_key(
                 context.candidates
             ),
 
-        "target":
+        "query_payload":
             _normalize(
-                query.target
-            ),
-
-        "alternatives":
-            _normalize(
-                query.alternatives
-            ),
-
-        "params":
-            _normalize(
-                query.params
+                query.payload
             ),
     }
 

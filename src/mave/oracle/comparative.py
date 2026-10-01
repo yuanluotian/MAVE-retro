@@ -67,7 +67,7 @@ class ComparativeOracle(FeedbackOracle):
 
         raise ValueError(
             f"Unsupported comparative feedback type: "
-            f"{query.feedback_type.value}"
+            f"{query.feedback_type!r}"
         )
 
     # ========================================================
@@ -81,7 +81,9 @@ class ComparativeOracle(FeedbackOracle):
 
         reaction_a, reaction_b = (
             self._require_pair(
-                query.alternatives,
+                query.payload.get(
+                    "reactions"
+                ),
                 Reaction,
                 "reaction",
             )
@@ -167,7 +169,9 @@ class ComparativeOracle(FeedbackOracle):
 
         route_a, route_b = (
             self._require_pair(
-                query.alternatives,
+                query.payload.get(
+                    "routes"
+                ),
                 SynthesisRoute,
                 "route",
             )
@@ -249,10 +253,22 @@ class ComparativeOracle(FeedbackOracle):
 
     @staticmethod
     def _require_pair(
-        values: Sequence[Any],
+        values: Any,
         expected_type: type,
         name: str,
     ) -> tuple[Any, Any]:
+
+        if not isinstance(
+            values,
+            Sequence,
+        ) or isinstance(
+            values,
+            (str, bytes),
+        ):
+            raise TypeError(
+                f"{name.capitalize()} comparison requires "
+                f"query.payload['{name}s'] to be a sequence."
+            )
 
         if len(values) != 2:
 

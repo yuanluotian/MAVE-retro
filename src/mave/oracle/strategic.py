@@ -9,6 +9,7 @@ from mave.oracle.base import (
     FeedbackType,
     OracleContext,
     OracleResult,
+    coerce_feedback_type,
 )
 from mave.oracle.backends.depth_traversal import (
     DepthTraversalBackend,
@@ -477,7 +478,7 @@ class StrategicOracle(FeedbackOracle):
         *,
         text: str,
         backend_result: BackendResult,
-        feedback_type: FeedbackType,
+        feedback_type: FeedbackType | str,
     ) -> OracleResult:
 
         metadata = dict(
@@ -485,7 +486,7 @@ class StrategicOracle(FeedbackOracle):
         )
 
         metadata["feedback_type"] = (
-            feedback_type.value
+            coerce_feedback_type(feedback_type).value
         )
 
         return OracleResult(

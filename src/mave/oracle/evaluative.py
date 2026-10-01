@@ -10,6 +10,7 @@ from mave.oracle.base import (
     FeedbackType,
     OracleContext,
     OracleResult,
+    coerce_feedback_type,
 )
 from mave.oracle.backends.round_trip import (
     RoundTripBackend,
@@ -53,7 +54,7 @@ class EvaluativeOracle(FeedbackOracle):
         if not self.supports(query.feedback_type):
             raise ValueError(
                 f"Unsupported evaluative feedback type: "
-                f"{query.feedback_type.value}"
+                f"{query.feedback_type!r}"
             )
 
         reaction = self._require_reaction(
@@ -112,16 +113,17 @@ class EvaluativeOracle(FeedbackOracle):
         query: FeedbackQuery,
     ) -> Reaction:
 
-        if not isinstance(
-            query.target,
-            Reaction,
-        ):
+        reaction = query.payload.get(
+            "reaction"
+        )
+
+        if not isinstance(reaction, Reaction):
             raise TypeError(
                 "L2 feedback requires "
-                "query.target to be a Reaction."
+                "query.payload['reaction'] to be a Reaction."
             )
 
-        return query.target
+        return reaction
 
     @staticmethod
     def _format_feasibility(
@@ -266,7 +268,7 @@ class EvaluativeOracle(FeedbackOracle):
         *,
         text: str,
         backend_result: BackendResult,
-        feedback_type: FeedbackType,
+        feedback_type: FeedbackType | str,
     ) -> OracleResult:
 
         metadata = dict(
@@ -274,7 +276,7 @@ class EvaluativeOracle(FeedbackOracle):
         )
 
         metadata["feedback_type"] = (
-            feedback_type.value
+            coerce_feedback_type(feedback_type).value
         )
 
         return OracleResult(

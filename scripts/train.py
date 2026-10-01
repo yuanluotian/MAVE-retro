@@ -474,18 +474,6 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--provider-factory",
-        type=str,
-        default=None,
-        help=(
-            "Optional provider builder in "
-            "'module:function' format. "
-            "prepare_system() remains the sole "
-            "system-construction entry point."
-        ),
-    )
-
-    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path(
@@ -544,10 +532,7 @@ def main() -> None:
     # --------------------------------------------------------
 
     system = prepare_system(
-        config,
-        provider_factory=(
-            args.provider_factory
-        ),
+        config
     )
 
     trainer = build_trainers(
