@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from omegaconf import OmegaConf
 
@@ -15,6 +14,11 @@ from mave.core.utils import (
 
 from mave.mave.curve_fit import (
     CurveFitConfig,
+)
+
+from mave.mave.interface import (
+    MAVESystem,
+    prepare_system,
 )
 
 from mave.mave.rollout_group import (
@@ -109,60 +113,16 @@ def build_config_bundle(
 
 
 # ============================================================
-# Runtime-factory hook
-# ============================================================
-
-
-def load_symbol(
-    spec: str,
-) -> Callable[..., Any]:
-    """
-    Load:
-
-        package.module:function
-    """
-
-    if ":" not in spec:
-        raise ValueError(
-            "Factory must use "
-            "'module:function' format."
-        )
-
-    module_name, symbol_name = (
-        spec.split(
-            ":",
-            maxsplit=1,
-        )
-    )
-
-    module = (
-        importlib.import_module(
-            module_name
-        )
-    )
-
-    symbol = getattr(
-        module,
-        symbol_name,
-    )
-
-    if not callable(symbol):
-        raise TypeError(
-            f"{spec!r} is not callable."
-        )
-
-    return symbol
-
-
-# ============================================================
 # Trainer construction
 # ============================================================
 
 
 def build_trainers(
     config: dict[str, Any],
-    runtime: dict[str, Any],
+    system: MAVESystem,
 ) -> AlternatingTrainer:
+
+    system.require_training_ready()
 
     mave_cfg = (
         config["mave_train"]
@@ -274,13 +234,15 @@ def build_trainers(
 
     escalation_trainer = (
         EscalationTrainer(
-            policy=runtime[
-                "escalation_policy"
-            ],
+            policy=(
+                system
+                .escalation_policy
+            ),
 
-            reference_policy=runtime[
-                "reference_escalation_policy"
-            ],
+            reference_policy=(
+                system
+                .reference_escalation_policy
+            ),
 
             mave_processor=(
                 mave_processor
@@ -290,14 +252,9 @@ def build_trainers(
                 escalation_cfg
             ),
 
-            optimizer=runtime.get(
-                "escalation_optimizer"
-            ),
-
             trainable_parameters=(
-                runtime.get(
-                    "escalation_trainable_parameters"
-                )
+                system
+                .escalation_trainable_parameters
             ),
         )
     )
@@ -347,26 +304,23 @@ def build_trainers(
 
     reaction_trainer = (
         ReactionTrainer(
-            policy=runtime[
-                "reaction_policy"
-            ],
+            policy=(
+                system
+                .reaction_policy
+            ),
 
-            reference_policy=runtime[
-                "reference_reaction_policy"
-            ],
+            reference_policy=(
+                system
+                .reference_reaction_policy
+            ),
 
             config=(
                 reaction_train_config
             ),
 
-            optimizer=runtime.get(
-                "reaction_optimizer"
-            ),
-
             trainable_parameters=(
-                runtime.get(
-                    "reaction_trainable_parameters"
-                )
+                system
+                .reaction_trainable_parameters
             ),
         )
     )
@@ -419,15 +373,13 @@ def build_trainers(
         ),
 
         escalation_batch_provider=(
-            runtime[
-                "escalation_batch_provider"
-            ]
+            system
+            .escalation_batch_provider
         ),
 
         reaction_batch_provider=(
-            runtime[
-                "reaction_batch_provider"
-            ]
+            system
+            .reaction_batch_provider
         ),
 
         config=alternating_cfg,
@@ -439,16 +391,13 @@ def build_trainers(
 # ============================================================
 
 
-def save_runtime_checkpoint(
-    runtime: dict[str, Any],
+def save_system_checkpoint(
+    system: MAVESystem,
     path: Path,
 ) -> None:
 
     checkpointables = (
-        runtime.get(
-            "checkpointables",
-            {},
-        )
+        system.checkpointables
     )
 
     if not checkpointables:
@@ -525,12 +474,14 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--runtime-factory",
+        "--provider-factory",
         type=str,
-        required=True,
+        default=None,
         help=(
-            "Dotted runtime builder in "
-            "'module:function' format."
+            "Optional provider builder in "
+            "'module:function' format. "
+            "prepare_system() remains the sole "
+            "system-construction entry point."
         ),
     )
 
@@ -589,42 +540,19 @@ def main() -> None:
         )
 
     # --------------------------------------------------------
-    # Runtime components not uniquely reconstructable from paper.
+    # Build the complete system through the single composition root.
     # --------------------------------------------------------
 
-    factory = load_symbol(
-        args.runtime_factory
+    system = prepare_system(
+        config,
+        provider_factory=(
+            args.provider_factory
+        ),
     )
-
-    runtime = factory(
-        config
-    )
-
-    required = {
-        "escalation_policy",
-        "reaction_policy",
-        "reference_escalation_policy",
-        "reference_reaction_policy",
-        "escalation_batch_provider",
-        "reaction_batch_provider",
-    }
-
-    missing = (
-        required
-        - set(runtime)
-    )
-
-    if missing:
-        raise KeyError(
-            "Runtime factory missing keys: "
-            + ", ".join(
-                sorted(missing)
-            )
-        )
 
     trainer = build_trainers(
         config,
-        runtime,
+        system,
     )
 
     log_path = (
@@ -675,8 +603,8 @@ def main() -> None:
             % args.checkpoint_every
             == 0
         ):
-            save_runtime_checkpoint(
-                runtime,
+            save_system_checkpoint(
+                system,
                 output_dir
                 / "checkpoints"
                 / (
@@ -696,8 +624,8 @@ def main() -> None:
         callback=callback
     )
 
-    save_runtime_checkpoint(
-        runtime,
+    save_system_checkpoint(
+        system,
         output_dir
         / "checkpoints"
         / "final.pt",

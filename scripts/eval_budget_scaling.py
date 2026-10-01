@@ -7,7 +7,6 @@ from pathlib import Path
 from evaluate import (
     build_config_bundle,
     evaluate_once,
-    load_symbol,
     load_targets,
     save_report,
 )
@@ -56,8 +55,14 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--runtime-factory",
-        required=True,
+        "--provider-factory",
+        default=None,
+        help=(
+            "Optional provider builder in "
+            "'module:function' format. "
+            "Each budget is assembled through "
+            "prepare_system()."
+        ),
     )
 
     parser.add_argument(
@@ -87,10 +92,6 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-
-    factory = load_symbol(
-        args.runtime_factory
-    )
 
     all_results = []
 
@@ -148,12 +149,12 @@ def main() -> None:
 
         payload = evaluate_once(
             config=config,
-            runtime_factory=(
-                factory
-            ),
             targets=targets,
             method_name=(
                 args.method
+            ),
+            provider_factory=(
+                args.provider_factory
             ),
         )
 

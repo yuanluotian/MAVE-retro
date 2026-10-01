@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mave-retro"
 version = "0.1.0"
-description = "Marginal-Value-Aware Escalation for retrosynthetic planning"
+description = "Official implementation of Marginal-Value-Aware Escalation for retrosynthetic planning"
 readme = "README.md"
 requires-python = ">=3.10,<3.12"
 dynamic = ["dependencies"]

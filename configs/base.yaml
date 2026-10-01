@@ -135,8 +135,10 @@ logging:
 # ------------------------------------------------------------
 
 reproduction:
-  source: paper_only
-  use_original_repository: false
+  # This repository is the official implementation accompanying the paper.
+  source: official_implementation
+  use_original_repository: true
+  implementation_status: official
 
   # Anything not explicitly specified by the paper should be
   # recorded here rather than silently assumed.

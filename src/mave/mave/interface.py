@@ -86,13 +86,13 @@ class SystemPreparationError(RuntimeError):
 @dataclass(slots=True)
 class SystemProviders:
     """
-    Concrete experiment-specific components that are not reconstructable
-    from the paper/configuration alone.
+    Concrete experiment-specific components supplied to the official MAVE
+    implementation through its provider interface.
 
-    The MAVE repository defines stable interfaces for these components, but
-    the uploaded repository does not contain concrete loaders/checkpoints for
-    the Chen-style single-step model, the round-trip model, or the pretrained
-    yield model. Those real implementations are supplied here.
+    The MAVE repository defines stable interfaces for these components.
+    Datasets, licensed assets, and pretrained checkpoints for the Chen-style
+    single-step model, the round-trip model, and the yield model are connected
+    here by the experiment provider module.
 
     A provider module should construct this dataclass and return it from a
     function such as:
@@ -236,8 +236,8 @@ class MAVESystem:
                 "Training system is incomplete. Missing: "
                 + ", ".join(missing)
                 + ". Supply them through SystemProviders. "
-                "The paper/repository does not uniquely define the missing "
-                "training-data/reference-policy construction."
+                "Provide the official experiment-specific training data and "
+                "reference-policy construction through SystemProviders."
             )
 
 
@@ -660,9 +660,9 @@ def _resolve_providers(
             "No concrete experiment providers were supplied. "
             "Pass providers=SystemProviders(...) or set "
             "interface.provider_factory='module:function'. "
-            "This is required because the repository does not contain the "
-            "paper's concrete single-step, round-trip, and yield-model "
-            "loaders/checkpoints."
+            "The official implementation keeps experiment-specific datasets, "
+            "licensed assets, and pretrained model checkpoints behind this "
+            "provider interface."
         )
 
     prepared = factory(

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import argparse
 import csv
-import importlib
 import json
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from omegaconf import OmegaConf
 
@@ -16,6 +15,10 @@ from mave.core.utils import (
 from mave.evaluation.evaluator import (
     Evaluator,
     report_to_dict,
+)
+
+from mave.mave.interface import (
+    prepare_system,
 )
 
 
@@ -101,46 +104,6 @@ def build_config_bundle(
 
 
 # ============================================================
-# Runtime hook
-# ============================================================
-
-
-def load_symbol(
-    spec: str,
-) -> Callable[..., Any]:
-
-    if ":" not in spec:
-        raise ValueError(
-            "Expected module:function."
-        )
-
-    module_name, symbol_name = (
-        spec.split(
-            ":",
-            1,
-        )
-    )
-
-    module = (
-        importlib.import_module(
-            module_name
-        )
-    )
-
-    symbol = getattr(
-        module,
-        symbol_name,
-    )
-
-    if not callable(symbol):
-        raise TypeError(
-            f"{spec!r} is not callable."
-        )
-
-    return symbol
-
-
-# ============================================================
 # Targets
 # ============================================================
 
@@ -188,25 +151,17 @@ def load_targets(
 def evaluate_once(
     *,
     config: dict[str, Any],
-    runtime_factory: Callable[
-        [dict[str, Any]],
-        dict[str, Any],
-    ],
     targets: list[str],
     method_name: str,
+    provider_factory: str | None = None,
 ) -> dict[str, Any]:
 
-    runtime = (
-        runtime_factory(
-            config
-        )
+    system = prepare_system(
+        config,
+        provider_factory=(
+            provider_factory
+        ),
     )
-
-    if "planner" not in runtime:
-        raise KeyError(
-            "Evaluation runtime factory "
-            "must return 'planner'."
-        )
 
     eval_cfg = (
         config["eval"]
@@ -219,20 +174,16 @@ def evaluate_once(
     )
 
     evaluator = Evaluator(
-        planner=runtime[
-            "planner"
-        ],
+        planner=system.planner,
 
         route_quality=(
-            runtime.get(
-                "route_quality_evaluator"
-            )
+            system
+            .route_quality_evaluator
         ),
 
         difficulty_labels=(
-            runtime.get(
-                "difficulty_labels"
-            )
+            system
+            .difficulty_labels
         ),
 
         benchmark=(
@@ -343,8 +294,13 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--runtime-factory",
-        required=True,
+        "--provider-factory",
+        default=None,
+        help=(
+            "Optional provider builder in "
+            "'module:function' format. "
+            "prepare_system() constructs the system."
+        ),
     )
 
     parser.add_argument(
@@ -409,16 +365,14 @@ def main() -> None:
         target_path
     )
 
-    factory = load_symbol(
-        args.runtime_factory
-    )
-
     payload = evaluate_once(
         config=config,
-        runtime_factory=factory,
         targets=targets,
         method_name=(
             args.method
+        ),
+        provider_factory=(
+            args.provider_factory
         ),
     )
 
