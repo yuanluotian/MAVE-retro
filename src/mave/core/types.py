@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum, IntEnum
 from typing import Any, Mapping, Sequence
 
@@ -56,21 +56,18 @@ class EscalationActionType(str, Enum):
 @dataclass(frozen=True, slots=True)
 class ReactionCandidate:
     """
-    Candidate retrosynthetic reaction proposed by the
-    single-step model.
+    Candidate retrosynthetic reaction proposed by the single-step model.
 
-    The paper retains top-50 single-step predictions.
+    `reaction_id` is the stable planner-visible identifier used in prompts,
+    e.g. R1, R2, ..., while the chemistry is always executed using the
+    underlying structured fields rather than by parsing model-generated text.
     """
 
     product_smiles: str
     reactant_smiles: tuple[str, ...]
-
-    # Score returned by the single-step retrosynthesis model.
     single_step_score: float
 
     template_id: str | None = None
-
-    # Optional stable identifier.
     reaction_id: str | None = None
 
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -84,9 +81,22 @@ class ReactionCandidate:
                 "reactant_smiles must contain at least one reactant."
             )
 
+        if self.reaction_id is not None and not self.reaction_id:
+            raise ValueError("reaction_id must be non-empty when provided.")
+
     @property
     def num_reactants(self) -> int:
         return len(self.reactant_smiles)
+
+    @property
+    def display_id(self) -> str:
+        """
+        Planner-visible identifier.
+
+        Reaction IDs should normally be assigned before constructing prompts.
+        This fallback is useful for diagnostics only.
+        """
+        return self.reaction_id or "<unassigned-reaction>"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,23 +104,21 @@ class PlanningState:
     """
     Retrosynthetic planning state.
 
-    Following the paper, the state contains the current set of
-    unsolved molecules. Applying a reaction replaces one selected
-    product with its predicted reactants.
+    The state contains the target and the current set of unsolved molecules.
+    Applying a reaction replaces one selected product with its predicted
+    reactants.
     """
 
     target_smiles: str
-
     unsolved_molecules: tuple[str, ...]
 
     # Number of reaction decisions already applied.
     depth: int = 0
 
-    # Optional state identifier, useful for caching.
+    # Stable identifier useful for oracle caching and interaction records.
     state_id: str | None = None
 
-    # Keep the core representation planner-agnostic.
-    # Tree-specific information should live in planning/.
+    # Tree-specific information should remain in planning/.
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -126,31 +134,61 @@ class PlanningState:
 
 
 # ============================================================
-# Feedback
+# Natural-language feedback protocol
 # ============================================================
 
 
 @dataclass(frozen=True, slots=True)
 class FeedbackQuery:
     """
-    A query q belonging to one feedback level Q^(l).
+    Executable feedback query selected by the escalation policy.
 
-    The exact payload depends on the oracle:
-      - reaction candidate
-      - reaction pair
-      - partial route
-      - current molecule
-      - planning frontier
-      etc.
+    A query deliberately has two representations:
+
+    1. Planner-visible representation
+       - query_id
+       - question
+       - target_ids
+       - feedback_type
+
+       These fields are rendered in the language-model prompt.
+
+    2. Oracle-execution representation
+       - payload
+
+       `payload` stores the structured Python-side objects/arguments needed by
+       the oracle backend. The oracle must not recover execution targets by
+       parsing the natural-language question.
+
+    Example
+    -------
+    FeedbackQuery(
+        level=FeedbackLevel.L2,
+        feedback_type="reaction_yield",
+        query_id="Q_L2_YIELD_R3",
+        question=(
+            "What is the predicted normalized yield of candidate reaction R3?"
+        ),
+        target_ids=("R3",),
+        payload={"reaction": reaction_candidate},
+    )
     """
 
     level: FeedbackLevel
-
     feedback_type: str
 
-    payload: Mapping[str, Any] = field(default_factory=dict)
+    # Stable identifier for the semantic query within the planning context.
+    query_id: str
 
-    query_id: str | None = None
+    # Natural-language question shown to the planner/oracle interface.
+    question: str
+
+    # Planner-visible IDs of the objects being queried, e.g. ("R3",) or
+    # ("R1", "R3"). These are descriptive references, not execution payloads.
+    target_ids: tuple[str, ...] = ()
+
+    # Structured backend inputs. Never reconstruct these by parsing `question`.
+    payload: Mapping[str, Any] = field(default_factory=dict)
 
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -163,36 +201,225 @@ class FeedbackQuery:
         if not self.feedback_type:
             raise ValueError("feedback_type must not be empty.")
 
+        if not self.query_id:
+            raise ValueError("query_id must not be empty.")
+
+        if not self.question or not self.question.strip():
+            raise ValueError("question must not be empty.")
+
+        if any(not target_id for target_id in self.target_ids):
+            raise ValueError("target_ids must not contain empty identifiers.")
+
+    @property
+    def semantic_key(self) -> tuple[Any, ...]:
+        """
+        Query identity independent of natural-language wording.
+
+        Oracle caches should normally combine this with a state/context ID.
+        Query factories may override/extend semantic identity through
+        metadata if additional parameters affect the oracle result.
+        """
+        explicit_key = self.metadata.get("semantic_key")
+        if explicit_key is not None:
+            if isinstance(explicit_key, tuple):
+                return explicit_key
+            if isinstance(explicit_key, Sequence) and not isinstance(
+                explicit_key, (str, bytes)
+            ):
+                return tuple(explicit_key)
+            return (explicit_key,)
+
+        return (
+            int(self.level),
+            self.feedback_type,
+            self.target_ids,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class Feedback:
     """
-    Feedback returned by oracle O(q).
+    Natural-language answer returned by oracle O(q).
 
-    cost corresponds to C(q).
+    Each feedback item preserves the complete question-answer association.
+    This is important because accumulated feedback is rendered back into the
+    planner prompt at the next escalation/reaction decision.
+
+    `answer` is the canonical planner-visible field. `content` is provided as
+    a read-only compatibility alias for older code that accessed
+    feedback.content.
     """
 
     level: FeedbackLevel
-
     feedback_type: str
 
-    content: Any
+    query_id: str
+    question: str
+    answer: str
 
-    cost: float
+    target_ids: tuple[str, ...] = ()
 
-    query_id: str | None = None
-
-    # True when retrieved from cache rather than newly acquired.
+    # Acquisition cost C(q). Cached feedback should normally have zero newly
+    # incurred cost at the execution layer if that is the repository policy;
+    # the `cached` flag records how the answer was obtained.
+    cost: float = 0.0
     cached: bool = False
 
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if self.level == FeedbackLevel.L0:
+            raise ValueError("L0 should not produce oracle feedback.")
+
         if self.cost < 0:
             raise ValueError("Feedback cost must be non-negative.")
 
         if not self.feedback_type:
             raise ValueError("feedback_type must not be empty.")
+
+        if not self.query_id:
+            raise ValueError("query_id must not be empty.")
+
+        if not self.question or not self.question.strip():
+            raise ValueError("question must not be empty.")
+
+        if not self.answer or not self.answer.strip():
+            raise ValueError("answer must not be empty.")
+
+        if any(not target_id for target_id in self.target_ids):
+            raise ValueError("target_ids must not contain empty identifiers.")
+
+    @property
+    def content(self) -> str:
+        """
+        Backward-compatible alias for the natural-language oracle answer.
+        """
+        return self.answer
+
+    @classmethod
+    def from_query(
+        cls,
+        query: FeedbackQuery,
+        *,
+        answer: str,
+        cost: float,
+        cached: bool = False,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "Feedback":
+        """
+        Construct feedback while preserving the exact selected query.
+        """
+        merged_metadata: dict[str, Any] = dict(query.metadata)
+        if metadata is not None:
+            merged_metadata.update(metadata)
+
+        return cls(
+            level=query.level,
+            feedback_type=query.feedback_type,
+            query_id=query.query_id,
+            question=query.question,
+            answer=answer,
+            target_ids=query.target_ids,
+            cost=float(cost),
+            cached=bool(cached),
+            metadata=merged_metadata,
+        )
+
+    def as_cached(self, *, cost: float = 0.0) -> "Feedback":
+        """
+        Return a copy marked as retrieved from cache.
+
+        The default newly incurred cost is zero. If the experimental protocol
+        charges for cache retrieval, pass that cost explicitly.
+        """
+        return replace(self, cached=True, cost=float(cost))
+
+
+# ============================================================
+# Oracle context
+# ============================================================
+
+
+@dataclass(frozen=True, slots=True)
+class OracleContext:
+    """
+    Structured context supplied to query generation and oracle execution.
+
+    The natural-language question is carried by FeedbackQuery. OracleContext
+    contains the underlying planning objects required to construct legal
+    queries and execute them deterministically.
+
+    `selected_molecule` is the frontier/current molecule being expanded.
+    """
+
+    state: PlanningState
+    selected_molecule: str
+    candidates: tuple[ReactionCandidate, ...]
+
+    current_level: FeedbackLevel = FeedbackLevel.L0
+    feedback_history: tuple[Feedback, ...] = ()
+
+    # Optional explicit context identifier. If omitted, state.state_id is used.
+    context_id: str | None = None
+
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.selected_molecule:
+            raise ValueError("selected_molecule must not be empty.")
+
+        if len(self.candidates) == 0:
+            raise ValueError(
+                "OracleContext requires at least one reaction candidate."
+            )
+
+    @property
+    def state_id(self) -> str | None:
+        """
+        Compatibility/access helper used by planner and cache code.
+        """
+        return self.state.state_id
+
+    @property
+    def effective_context_id(self) -> str | None:
+        return self.context_id or self.state.state_id
+
+    @property
+    def cumulative_cost(self) -> float:
+        return float(
+            sum(feedback.cost for feedback in self.feedback_history)
+        )
+
+    @property
+    def has_feedback(self) -> bool:
+        return len(self.feedback_history) > 0
+
+    def to_escalation_context(
+        self,
+        *,
+        available_queries: Sequence[FeedbackQuery] = (),
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "EscalationContext":
+        """
+        Convert the oracle/planning context into the policy-facing context.
+
+        Keeping this conversion here prevents MCTS, rollout collection, and
+        training code from constructing subtly different policy inputs.
+        """
+        merged_metadata: dict[str, Any] = dict(self.metadata)
+        if metadata is not None:
+            merged_metadata.update(metadata)
+
+        return EscalationContext(
+            state=self.state,
+            candidates=self.candidates,
+            current_level=self.current_level,
+            feedback_history=self.feedback_history,
+            available_queries=tuple(available_queries),
+            selected_molecule=self.selected_molecule,
+            context_id=self.effective_context_id,
+            metadata=merged_metadata,
+        )
 
 
 # ============================================================
@@ -203,7 +430,7 @@ class Feedback:
 @dataclass(frozen=True, slots=True)
 class EscalationAction:
     """
-    Action sampled from escalation policy mu.
+    Structured action sampled from escalation policy mu.
 
     Either:
 
@@ -212,10 +439,12 @@ class EscalationAction:
     or:
 
         ESCALATE(query)
+
+    The language model predicts among serialized legal structured actions;
+    execution always uses the attached FeedbackQuery object.
     """
 
     action_type: EscalationActionType
-
     query: FeedbackQuery | None = None
 
     @classmethod
@@ -269,24 +498,27 @@ class EscalationAction:
 @dataclass(frozen=True, slots=True)
 class EscalationContext:
     """
-    Input context for escalation policy mu.
-
-    Corresponds conceptually to:
+    Input context for escalation policy mu:
 
         mu(. | s_t, f_t^(<=l))
 
-    Candidate reactions are included because practical policy
-    prompts may need access to the current reaction space.
+    In the language-interface implementation the policy also receives the
+    legal next-level queries. Each query already contains the natural-language
+    question and structured execution payload.
+
+    `selected_molecule` identifies the molecule currently being expanded.
     """
 
     state: PlanningState
-
     candidates: tuple[ReactionCandidate, ...]
 
     current_level: FeedbackLevel = FeedbackLevel.L0
-
     feedback_history: tuple[Feedback, ...] = ()
 
+    # Legal queries available if the policy chooses ESCALATE.
+    available_queries: tuple[FeedbackQuery, ...] = ()
+
+    selected_molecule: str | None = None
     context_id: str | None = None
 
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -296,6 +528,14 @@ class EscalationContext:
             raise ValueError(
                 "EscalationContext requires at least one reaction candidate."
             )
+
+        for query in self.available_queries:
+            expected_level = int(self.current_level) + 1
+            if int(query.level) != expected_level:
+                raise ValueError(
+                    "available_queries must belong to the next feedback "
+                    f"level L{expected_level}; received {query.level.name}."
+                )
 
     @property
     def cumulative_cost(self) -> float:
@@ -307,6 +547,10 @@ class EscalationContext:
     def has_feedback(self) -> bool:
         return len(self.feedback_history) > 0
 
+    @property
+    def effective_context_id(self) -> str | None:
+        return self.context_id or self.state.state_id
+
 
 # ============================================================
 # Policy trajectory records
@@ -316,37 +560,59 @@ class EscalationContext:
 @dataclass(frozen=True, slots=True)
 class EscalationDecision:
     """
-    One decision made by escalation policy mu.
+    One structured decision made by escalation policy mu.
 
-    logprob is needed later for GRPO.
+    Besides the sampled action and log-probability, optional prompt/completion
+    fields preserve the exact language-model interaction used for training
+    diagnostics and policy-probability recomputation.
     """
 
     level: FeedbackLevel
-
     action: EscalationAction
-
     logprob: float
 
-    # Optional probability / entropy information for diagnostics.
     probability: float | None = None
     entropy: float | None = None
 
+    # Exact model-facing artifacts when available.
+    prompt: str | None = None
+    completion: str | None = None
+    legal_completions: tuple[str, ...] = ()
+
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.action.is_escalate and self.action.query is not None:
+            expected_level = int(self.level) + 1
+            if int(self.action.query.level) != expected_level:
+                raise ValueError(
+                    "An ESCALATE action must query the next feedback level."
+                )
 
 
 @dataclass(frozen=True, slots=True)
 class ReactionDecision:
     """
     Reaction action sampled or selected from policy pi.
+
+    `reaction_id` is available through `reaction.reaction_id`; the underlying
+    ReactionCandidate remains the executable object.
     """
 
     reaction: ReactionCandidate
-
     logprob: float
 
     probability: float | None = None
 
+    prompt: str | None = None
+    completion: str | None = None
+    legal_completions: tuple[str, ...] = ()
+
     metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def reaction_id(self) -> str | None:
+        return self.reaction.reaction_id
 
 
 # ============================================================
@@ -364,32 +630,34 @@ class EscalationRollout:
         c_k = accumulated feedback acquisition cost
         r_k = downstream planning return
 
-    A single rollout-level MAVE advantage will later be assigned
-    to all escalation decisions in this rollout.
+    A single rollout-level MAVE advantage can later be assigned to all
+    escalation decisions in this rollout.
     """
 
     context_id: str
 
     escalation_decisions: tuple[EscalationDecision, ...]
-
     feedback: tuple[Feedback, ...]
 
     reaction_decision: ReactionDecision
 
     cost: float
-
     downstream_return: float
 
-    # Optional information about full downstream planning.
     success: bool | None = None
-
     terminal_depth: int | None = None
 
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not self.context_id:
+            raise ValueError("context_id must not be empty.")
+
         if self.cost < 0:
             raise ValueError("Rollout cost must be non-negative.")
+
+        if self.terminal_depth is not None and self.terminal_depth < 0:
+            raise ValueError("terminal_depth must be non-negative.")
 
     @property
     def stopping_level(self) -> FeedbackLevel:
@@ -398,7 +666,6 @@ class EscalationRollout:
 
         If no feedback was acquired, return L0.
         """
-
         if not self.feedback:
             return FeedbackLevel.L0
 
@@ -424,19 +691,20 @@ class EscalationRollout:
 @dataclass(frozen=True, slots=True)
 class RolloutGroup:
     """
-    K complete escalation rollouts sampled from the same
-    planning context.
+    K complete escalation rollouts sampled from the same planning context.
 
     This is the direct input to reward-cost fitting.
     """
 
     context_id: str
-
     rollouts: tuple[EscalationRollout, ...]
 
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not self.context_id:
+            raise ValueError("context_id must not be empty.")
+
         if len(self.rollouts) == 0:
             raise ValueError(
                 "RolloutGroup must contain at least one rollout."
@@ -492,6 +760,10 @@ class RewardCostObservation:
 
     rollout_index: int | None = None
 
+    def __post_init__(self) -> None:
+        if self.cost < 0:
+            raise ValueError("cost must be non-negative.")
+
 
 @dataclass(frozen=True, slots=True)
 class MarginalValueSignals:
@@ -536,15 +808,12 @@ class MAVEAdvantageRecord:
 @dataclass(frozen=True, slots=True)
 class PlannerResult:
     """
-    Generic result returned by retrosynthetic planner.
+    Generic result returned by the retrosynthetic planner.
     """
 
     target_smiles: str
-
     success: bool
-
     route: Any | None
-
     single_step_calls: int
 
     feedback_queries: int = 0
@@ -553,6 +822,9 @@ class PlannerResult:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        if not self.target_smiles:
+            raise ValueError("target_smiles must not be empty.")
+
         if self.single_step_calls < 0:
             raise ValueError(
                 "single_step_calls must be non-negative."

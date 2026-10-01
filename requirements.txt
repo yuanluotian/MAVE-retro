@@ -6,7 +6,7 @@ safetensors>=0.5.0
 sentencepiece>=0.2.0
 datasets>=3.2.0
 peft>=0.14.0
-ray[default]>=2.41.0
+ray>=2.41.0
 vllm==0.8.4
 tensordict==0.6.2
 torchdata>=0.10.0
