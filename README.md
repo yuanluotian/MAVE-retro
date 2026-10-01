@@ -102,7 +102,7 @@ The single-step retrosynthesis model retains the top-50 candidate reactions. Mai
 MAVE-retro/
 ├── configs/
 ├── data/
-├── src/mave_repro/
+├── src/mave/
 │   ├── chemistry/
 │   ├── environment/
 │   ├── models/
