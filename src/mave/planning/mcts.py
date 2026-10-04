@@ -358,6 +358,10 @@ class MCTSPlanner:
                     candidates=candidates,
                     current_level=current_level,
                     feedback_history=feedback,
+                    purchasable_db=(
+                        self.environment
+                        .purchasable_db
+                    ),
                 )
 
                 available_queries = (

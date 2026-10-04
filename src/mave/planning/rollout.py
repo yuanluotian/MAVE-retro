@@ -510,6 +510,10 @@ class PlanningRolloutRunner:
                 candidates=candidates,
                 current_level=level,
                 feedback_history=feedback,
+                purchasable_db=(
+                    self.environment
+                    .purchasable_db
+                ),
             )
 
             queries = (

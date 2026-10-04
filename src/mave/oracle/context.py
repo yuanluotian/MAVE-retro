@@ -10,7 +10,9 @@ from mave.core.types import (
     OracleContext,
     ReactionCandidate,
 )
+from mave.environment.purchasable import PurchasableDatabase
 from mave.environment.state import RetroState
+from mave.environment.transition import apply_reaction
 
 
 _NATIVE_STATE = "_native_state"
@@ -41,6 +43,7 @@ def build_oracle_context(
     feedback_history: Sequence[Feedback] = (),
     context_id: str | None = None,
     metadata: Mapping[str, Any] | None = None,
+    purchasable_db: PurchasableDatabase | None = None,
 ) -> OracleContext:
     """Build the canonical oracle context from planner-native objects.
 
@@ -69,6 +72,29 @@ def build_oracle_context(
             _NATIVE_CANDIDATES: native_candidates,
         }
     )
+
+    route_keys = (
+        "routes",
+        "partial_routes",
+        "candidate_routes",
+    )
+
+    if (
+        current_level == FeedbackLevel.L2
+        and not any(
+            key in merged_metadata
+            for key in route_keys
+        )
+    ):
+        merged_metadata["candidate_routes"] = tuple(
+            apply_reaction(
+                state,
+                reaction,
+                selected_index=selected_index,
+                purchasable_db=purchasable_db,
+            ).route
+            for reaction in native_candidates
+        )
 
     return OracleContext(
         state=state.to_core_state(),
