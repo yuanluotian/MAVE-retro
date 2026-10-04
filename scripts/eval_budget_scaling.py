@@ -66,6 +66,12 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        required=True,
+    )
+
+    parser.add_argument(
         "--budgets",
         type=int,
         nargs="+",
@@ -142,6 +148,9 @@ def main() -> None:
             method_name=(
                 args.method
             ),
+            checkpoint_path=(
+                args.checkpoint
+            ),
         )
 
         output_file = (
@@ -202,6 +211,12 @@ def main() -> None:
 
         "feedback_setting":
             args.oracle,
+
+        "checkpoint":
+            str(
+                args.checkpoint
+                .resolve()
+            ),
 
         "results":
             all_results,

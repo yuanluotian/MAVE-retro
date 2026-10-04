@@ -17,6 +17,9 @@ from mave.evaluation.evaluator import (
     report_to_dict,
 )
 
+from mave.mave.checkpoint import (
+    load_policy_checkpoint,
+)
 from mave.mave.interface import (
     prepare_system,
 )
@@ -153,10 +156,16 @@ def evaluate_once(
     config: dict[str, Any],
     targets: list[str],
     method_name: str,
+    checkpoint_path: Path,
 ) -> dict[str, Any]:
 
     system = prepare_system(
         config
+    )
+
+    load_policy_checkpoint(
+        system,
+        checkpoint_path,
     )
 
     eval_cfg = (
@@ -221,6 +230,12 @@ def evaluate_once(
         ][
             "max_single_step_calls"
         ]
+    )
+
+    payload[
+        "checkpoint"
+    ] = str(
+        checkpoint_path.resolve()
     )
 
     return payload
@@ -307,6 +322,12 @@ def main() -> None:
     )
 
     parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        required=True,
+    )
+
+    parser.add_argument(
         "--output",
         type=Path,
         required=True,
@@ -356,6 +377,9 @@ def main() -> None:
         targets=targets,
         method_name=(
             args.method
+        ),
+        checkpoint_path=(
+            args.checkpoint
         ),
     )
 
