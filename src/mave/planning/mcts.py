@@ -183,6 +183,18 @@ class MCTSPlanner:
         feedback_queries = 0
         feedback_cost = 0.0
 
+        planning_iterations = 0
+        queried_iterations = 0
+        stopping_levels: list[int] = []
+
+        def result_metadata() -> dict[str, object]:
+            return {
+                "planning_iterations": planning_iterations,
+                "queried_iterations": queried_iterations,
+                "stopping_levels": tuple(stopping_levels),
+                "root_status": tree.root.status.value,
+            }
+
         # ----------------------------------------------------
         # Target itself may already be purchasable.
         # ----------------------------------------------------
@@ -199,6 +211,7 @@ class MCTSPlanner:
                 single_step_calls=0,
                 feedback_queries=0,
                 feedback_cost=0.0,
+                metadata=result_metadata(),
             )
 
         # ====================================================
@@ -233,6 +246,9 @@ class MCTSPlanner:
                     ),
                     feedback_cost=(
                         feedback_cost
+                    ),
+                    metadata=(
+                        result_metadata()
                     ),
                 )
 
@@ -322,6 +338,8 @@ class MCTSPlanner:
                 )
 
                 continue
+
+            planning_iterations += 1
 
             # ------------------------------------------------
             # Build planning/oracle state for this frontier.
@@ -449,6 +467,13 @@ class MCTSPlanner:
                     query.level
                 )
 
+            if feedback:
+                queried_iterations += 1
+
+            stopping_levels.append(
+                int(current_level)
+            )
+
             # ------------------------------------------------
             # Reaction policy:
             #
@@ -548,6 +573,9 @@ class MCTSPlanner:
                     feedback_cost=(
                         feedback_cost
                     ),
+                    metadata=(
+                        result_metadata()
+                    ),
                 )
 
         # ====================================================
@@ -569,10 +597,7 @@ class MCTSPlanner:
             feedback_cost=(
                 feedback_cost
             ),
-            metadata={
-                "root_status":
-                    tree.root.status.value,
-            },
+            metadata=result_metadata(),
         )
 
     # ========================================================

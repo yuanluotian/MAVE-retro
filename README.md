@@ -103,23 +103,34 @@ Reaction yield is used as the cost reference with base cost 1.0. Query-specific 
 
 The single-step retrosynthesis model retains the top-50 candidate reactions. Main experiments use a budget of 100 single-step model calls, with additional evaluations at 200, 500, and 1000 calls.
 
-## Repository
+## Repository structure
 
 ```text
 MAVE-retro/
-├── configs/
+├── configs/                    # Experiment configurations
+│
 ├── data/
-├── src/mave/
-│   ├── chemistry/
-│   ├── environment/
-│   ├── models/
-│   ├── oracle/
-│   ├── mave/
-│   ├── planning/
-│   ├── training/
-│   └── evaluation/
-├── scripts/
-└── tests/
+│   └── benchmarks/             # Retrosynthesis evaluation benchmarks
+│       ├── pdbbind-160.pkl
+│       ├── uspto-190.pkl
+│       └── wuxi-873.pkl
+│
+├── src/
+│   └── mave/
+│       ├── chemistry/          # Chemistry utilities and reaction handling
+│       ├── environment/        # Retrosynthesis environment
+│       ├── models/             # Model interfaces
+│       ├── oracle/             # Feedback hierarchy and oracle interfaces
+│       ├── mave/               # MAVE algorithm and system composition
+│       ├── planning/           # Retrosynthetic planning
+│       ├── training/           # Training and rollout utilities
+│       └── evaluation/         # Evaluation metrics and utilities
+│
+├── scripts/                    # Training and evaluation entry points
+├── environment.yml
+├── requirements.txt
+├── pyproject.toml
+└── README.md
 ```
 
 ## Installation
@@ -177,14 +188,3 @@ We report:
 - **Route quality**: target-normalized route score based on per-reaction yield quality.
 - **Query rate**: fraction of planning iterations that invoke external feedback.
 - **Query cost**: cumulative feedback acquisition cost per planning episode.
-
-## Citation
-
-```bibtex
-@inproceedings{mave2027,
-  title={Escalate Only When Necessary: Marginal-Value-Aware Feedback Acquisition for Retrosynthetic Planning},
-  author={Anonymous},
-  booktitle={International Conference on Learning Representations},
-  year={2027}
-}
-```
